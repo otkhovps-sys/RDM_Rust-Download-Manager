@@ -1,16 +1,24 @@
 name: Release
 
-# Push a tag like `v0.1.0` to build binaries for every platform and publish
-# them, together with the browser extension, as a GitHub release.
+# Builds binaries for every platform and publishes them, together with the
+# browser extension, as a GitHub release. Start it by pushing a tag like
+# `v1.0.0`, or run it by hand ("Run workflow") with the version to release;
+# the tag is then created by the release step.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v1.0.0"
+        required: true
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.version || github.ref_name }}
 
 jobs:
   build:
@@ -34,7 +42,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="rdm-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="rdm-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/$name/"
           cp -r extension README.md LICENSE "dist/$name/"
@@ -54,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Zip extension
-        run: cd extension && zip -r "../rdm-extension-${GITHUB_REF_NAME}.zip" .
+        run: cd extension && zip -r "../rdm-extension-${TAG}.zip" .
       - uses: actions/upload-artifact@v4
         with:
           name: extension
@@ -70,5 +78,8 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          name: RDM ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           files: artifacts/*
           generate_release_notes: true
