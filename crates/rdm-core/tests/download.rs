@@ -263,3 +263,120 @@ fn hls_stream_with_aes128() {
     assert_eq!(std::fs::read(d.path()).unwrap(), parts.concat());
     engine.shutdown();
 }
+
+#[test]
+fn torrent_from_local_seeder() {
+    use librqbit::{CreateTorrentOptions, ListenerOptions, Session, SessionOptions};
+
+    // librqbit needs IPv6 sockets (always there on desktops and CI runners,
+    // but some containers disable IPv6 completely).
+    if std::net::UdpSocket::bind("[::]:0").is_err() {
+        eprintln!("skipping: IPv6 sockets are not available here");
+        return;
+    }
+
+    // Content to share: a folder with two files.
+    let dir = temp_dir("torrent");
+    let source = dir.join("seed").join("My Album");
+    std::fs::create_dir_all(&source).unwrap();
+    let song = test_data(3 * 1024 * 1024 + 7);
+    let cover = test_data(200_000);
+    std::fs::write(source.join("song.flac"), &*song).unwrap();
+    std::fs::write(source.join("cover.jpg"), &*cover).unwrap();
+
+    // A seeder on localhost plus a minimal HTTP tracker pointing at it.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let seeder_port = Arc::new(AtomicUsize::new(0));
+    let tracker_port = {
+        let seeder_port = seeder_port.clone();
+        serve_routes(
+            move |path| {
+                path.starts_with("/announce").then(|| {
+                    let port = seeder_port.load(Ordering::SeqCst) as u16;
+                    let mut body = b"d8:intervali5e5:peers6:".to_vec();
+                    body.extend_from_slice(&[127, 0, 0, 1]);
+                    body.extend_from_slice(&port.to_be_bytes());
+                    body.push(b'e');
+                    Arc::new(body)
+                })
+            },
+            false,
+            Arc::new(AtomicUsize::new(0)),
+        )
+    };
+    let torrent_bytes = rt.block_on(async {
+        let opts = SessionOptions {
+            dht: None,
+            disable_local_service_discovery: true,
+            ipv4_only: true,
+            listen: Some(ListenerOptions {
+                listen_addr: "127.0.0.1:0".parse().unwrap(),
+                ipv4_only: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let seeder = Session::new_with_opts(dir.join("seed"), opts)
+            .await
+            .unwrap();
+        seeder_port.store(
+            seeder.listen_addr().unwrap().port() as usize,
+            Ordering::SeqCst,
+        );
+        let tracker = format!("http://127.0.0.1:{tracker_port}/announce");
+        let (created, _handle) = seeder
+            .create_and_serve_torrent(
+                &source,
+                CreateTorrentOptions {
+                    name: None,
+                    trackers: vec![tracker],
+                    piece_length: Some(65536),
+                },
+            )
+            .await
+            .unwrap();
+        // Keep the seeder alive for the rest of the test.
+        std::mem::forget(seeder);
+        created.as_bytes().unwrap()
+    });
+    let torrent_file = dir.join("album.torrent");
+    std::fs::write(&torrent_file, &torrent_bytes).unwrap();
+
+    let (engine, _) = engine("torrent-client");
+    let mut handle = engine.probe(torrent_file.to_str().unwrap(), RequestInfo::default());
+    let start = Instant::now();
+    let probe = loop {
+        if let Some(result) = handle.try_take() {
+            break result.unwrap();
+        }
+        assert!(start.elapsed() < Duration::from_secs(30), "probe timeout");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(probe.kind, rdm_core::Kind::Torrent);
+    assert_eq!(probe.file_name, "My Album");
+    let meta = probe.torrent.clone().unwrap();
+    assert!(meta.multi_file);
+    assert_eq!(meta.files.len(), 2);
+
+    let mut new = NewDownload::from_probe(&probe, RequestInfo::default(), &engine.settings());
+    assert_eq!(
+        new.category,
+        rdm_core::Category::Music,
+        "category of the biggest file"
+    );
+    new.save_dir = dir.join("downloads");
+    let id = engine.add(new);
+    let d = wait_for(&engine, id, |s| {
+        matches!(s, Status::Completed | Status::Failed(_))
+    });
+    assert_eq!(d.status, Status::Completed);
+    let folder = dir.join("downloads").join("My Album");
+    assert_eq!(std::fs::read(folder.join("song.flac")).unwrap(), *song);
+    assert_eq!(std::fs::read(folder.join("cover.jpg")).unwrap(), *cover);
+    assert_eq!(d.size, Some((song.len() + cover.len()) as u64));
+    engine.shutdown();
+    std::mem::forget(rt);
+}

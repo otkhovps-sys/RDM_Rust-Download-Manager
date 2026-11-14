@@ -7,7 +7,7 @@ use crate::Category;
 /// File types the browser extension hands over to RDM (like IDM's list).
 const DEFAULT_CAPTURE_TYPES: &str = "3gp 7z aac ace aif apk arj asf avi bin bz2 deb dmg exe flac \
 flv gz gzip img iso jar lzh m4a m4v mkv mov mp3 mp4 mpeg mpg msi msu ogg opus pdf pkg ppt pptx \
-qt r00 r01 rar rm rmvb rpm sit tar tgz tif ts wav webm wma wmv xz z zip zst";
+qt r00 r01 rar rm rmvb rpm sit tar tgz tif torrent ts wav webm wma wmv xz z zip zst";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

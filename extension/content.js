@@ -78,6 +78,19 @@
     return null;
   }
 
+  // Magnet links open RDM instead of an external torrent app.
+  document.addEventListener(
+    "click",
+    async (e) => {
+      const link = e.target.closest && e.target.closest('a[href^="magnet:"]');
+      if (!link || e.defaultPrevented || e.button !== 0) return;
+      e.preventDefault();
+      const taken = await chrome.runtime.sendMessage({ type: "magnet", url: link.href });
+      if (!taken) location.href = link.href;
+    },
+    true
+  );
+
   let lastMove = 0;
   document.addEventListener(
     "mousemove",

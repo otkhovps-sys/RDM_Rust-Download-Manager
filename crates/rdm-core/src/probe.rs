@@ -17,9 +17,14 @@ pub struct ProbeResult {
     pub content_type: Option<String>,
     /// Number of media segments for HLS streams.
     pub hls_segments: Option<usize>,
+    /// Name and files of a torrent.
+    pub torrent: Option<crate::TorrentMeta>,
 }
 
 pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<ProbeResult> {
+    if crate::is_torrent_source(url) {
+        return ctx.torrents.probe(ctx, url, req).await;
+    }
     let response = ctx.get(url, req).header("Range", "bytes=0-").send().await?;
     let status = response.status();
     if !status.is_success() {
@@ -33,6 +38,14 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
             .map(str::to_owned)
     };
     let content_type = header(CONTENT_TYPE);
+
+    if content_type
+        .as_deref()
+        .is_some_and(|t| t.contains("x-bittorrent"))
+    {
+        drop(response);
+        return ctx.torrents.probe(ctx, url, req).await;
+    }
 
     let is_hls = content_type
         .as_deref()
@@ -76,6 +89,7 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
         kind: Kind::Http,
         content_type,
         hls_segments: None,
+        torrent: None,
     })
 }
 
@@ -100,5 +114,6 @@ async fn probe_hls(
         kind: Kind::Hls,
         content_type,
         hls_segments: Some(playlist.segments.len()),
+        torrent: None,
     })
 }

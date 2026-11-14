@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use egui::{Context, Id, RichText};
 use rdm_core::util::format_bytes;
-use rdm_core::{Category, Engine, Kind, NewDownload, ProbeHandle, ProbeResult, RequestInfo};
+use rdm_core::{
+    Category, Engine, Kind, NewDownload, ProbeHandle, ProbeResult, RequestInfo, TorrentMeta,
+};
 
 use super::{button_row, window};
 
@@ -62,7 +64,7 @@ impl AddUrl {
                     if looks_like_url(url) {
                         result = Some(Some(url.to_owned()));
                     } else {
-                        self.error = Some("Please enter a valid http(s) or ftp address.");
+                        self.error = Some("Please enter an http(s) address or a magnet link.");
                     }
                 }
             });
@@ -75,7 +77,7 @@ impl AddUrl {
 }
 
 fn looks_like_url(text: &str) -> bool {
-    ["http://", "https://"]
+    ["http://", "https://", "magnet:"]
         .iter()
         .any(|p| text.len() > p.len() && text.to_ascii_lowercase().starts_with(p))
 }
@@ -141,6 +143,11 @@ impl FileInfo {
                         ui.spinner();
                         ui.label("Getting file information...");
                     });
+                    if rdm_core::is_torrent_source(&self.url) {
+                        ui.weak(
+                            "Magnet links can take a minute: the details come from other peers.",
+                        );
+                    }
                     ui.weak(&self.url);
                     ctx.request_repaint_after(std::time::Duration::from_millis(100));
                     button_row(ui, |ui| open &= !ui.button("Cancel").clicked());
@@ -182,7 +189,7 @@ impl FileInfo {
                     .rsplit_once('.')
                     .map_or("ts", |(_, ext)| ext);
                 new.file_name = format!("{stem}.{ext}");
-            } else if name.contains('.') {
+            } else if probe.kind == Kind::Http && name.contains('.') {
                 new.file_name = name.to_owned();
                 new.category = Category::from_file_name(name);
                 new.save_dir = settings.save_dir_for(new.category);
@@ -244,7 +251,12 @@ impl Form {
                 ui.end_row();
 
                 ui.label("File name:");
-                ui.add(egui::TextEdit::singleline(&mut self.new.file_name).desired_width(400.0));
+                // Torrent names come from the torrent itself.
+                let editable = self.new.kind != Kind::Torrent;
+                ui.add_enabled(
+                    editable,
+                    egui::TextEdit::singleline(&mut self.new.file_name).desired_width(400.0),
+                );
                 ui.end_row();
 
                 ui.label("Description:");
@@ -252,17 +264,24 @@ impl Form {
                 ui.end_row();
 
                 ui.label("Size:");
-                ui.label(size_text(&self.probe));
+                ui.label(match &self.new.torrent {
+                    Some(meta) => format_bytes(meta.selected_size()),
+                    None => size_text(&self.probe),
+                });
                 ui.end_row();
 
                 ui.label("Resume:");
-                ui.label(if self.probe.resumable {
-                    "Yes - multiple connections"
-                } else {
-                    "No - single connection"
+                ui.label(match (self.new.kind, self.probe.resumable) {
+                    (Kind::Torrent, _) => "Yes - BitTorrent (peer to peer)",
+                    (_, true) => "Yes - multiple connections",
+                    (_, false) => "No - single connection",
                 });
                 ui.end_row();
             });
+
+        if let Some(meta) = &mut self.new.torrent {
+            torrent_files(ui, meta);
+        }
 
         let mut add = None;
         button_row(ui, |ui| {
@@ -277,6 +296,14 @@ impl Form {
                 add = Some(true);
             }
         });
+        let nothing_selected = self
+            .new
+            .torrent
+            .as_ref()
+            .is_some_and(|m| m.files.iter().all(|f| !f.selected));
+        if nothing_selected && add.is_some() {
+            add = None;
+        }
         if let Some(start) = add {
             let mut new = self.new.clone();
             new.save_dir = PathBuf::from(self.dir_text.trim());
@@ -285,6 +312,40 @@ impl Form {
             open = false;
         }
         open
+    }
+}
+
+/// Checklist of the files inside a torrent.
+fn torrent_files(ui: &mut egui::Ui, meta: &mut TorrentMeta) {
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("Files ({})", meta.files.len())).strong());
+        if ui.small_button("All").clicked() {
+            meta.files.iter_mut().for_each(|f| f.selected = true);
+        }
+        if ui.small_button("None").clicked() {
+            meta.files.iter_mut().for_each(|f| f.selected = false);
+        }
+    });
+    egui::ScrollArea::vertical()
+        .max_height(160.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for file in &mut meta.files {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut file.selected, "");
+                    ui.add(egui::Label::new(&file.path).truncate());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.weak(format_bytes(file.size));
+                    });
+                });
+            }
+        });
+    if meta.files.iter().all(|f| !f.selected) {
+        ui.colored_label(
+            egui::Color32::from_rgb(229, 57, 53),
+            "Select at least one file.",
+        );
     }
 }
 

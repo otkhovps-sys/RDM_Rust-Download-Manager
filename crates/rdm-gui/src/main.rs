@@ -13,7 +13,9 @@ use rdm_core::Engine;
 
 fn main() -> eframe::Result {
     // `rdm <url>`: hand the URL to an already running instance (single instance).
-    let url_arg = std::env::args().nth(1).filter(|a| a.contains("://"));
+    let url_arg = std::env::args()
+        .nth(1)
+        .and_then(|arg| source_argument(&arg));
     let port = rdm_core::Settings::load().server_port;
     if server::forward_to_running(port, url_arg.as_deref()) {
         return Ok(());
@@ -40,4 +42,19 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| Ok(Box::new(app::RdmApp::new(cc, engine, url_arg)))),
     )
+}
+
+/// Accepts URLs, magnet links and paths to `.torrent` files (e.g. when RDM is
+/// the default app for them).
+fn source_argument(arg: &str) -> Option<String> {
+    if arg.contains("://") || arg.to_ascii_lowercase().starts_with("magnet:") {
+        return Some(arg.to_owned());
+    }
+    let path = std::path::Path::new(arg);
+    (rdm_core::is_torrent_source(arg) && path.is_file()).then(|| {
+        path.canonicalize()
+            .unwrap_or(path.to_path_buf())
+            .display()
+            .to_string()
+    })
 }

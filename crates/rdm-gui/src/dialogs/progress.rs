@@ -121,6 +121,9 @@ fn row(ui: &mut egui::Ui, name: &str, value: &str) {
 
 fn status_text(d: &Download) -> String {
     match &d.status {
+        Status::Downloading if d.kind == Kind::Torrent => {
+            format!("Downloading from {} peers", d.connections)
+        }
         Status::Downloading if d.connections > 0 => {
             format!("Receiving data... ({} connections)", d.connections)
         }
@@ -140,6 +143,25 @@ fn details(ui: &mut egui::Ui, d: &Download) {
         if let Some(h) = d.hls {
             ui.label(format!("HLS segments: {} / {}", h.done, h.total));
         }
+        return;
+    }
+    if let Some(meta) = &d.torrent {
+        let selected: Vec<_> = meta.files.iter().filter(|f| f.selected).collect();
+        ui.label(format!(
+            "Torrent files: {} of {} selected",
+            selected.len(),
+            meta.files.len()
+        ));
+        egui::ScrollArea::vertical()
+            .max_height(140.0)
+            .show(ui, |ui| {
+                for file in selected {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(&file.path).truncate());
+                        ui.weak(format_bytes(file.size));
+                    });
+                }
+            });
         return;
     }
     let mut segments = d.segments.clone();

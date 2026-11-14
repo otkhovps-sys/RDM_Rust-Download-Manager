@@ -2,6 +2,7 @@
 //!
 //! * `GET  /ping`     -> app info and the file types to capture
 //! * `POST /download` -> `{url, referer?, cookies?, userAgent?, fileName?}`
+//!   (`url` may also be a magnet link)
 //! * `POST /show`     -> bring the main window to the front
 
 use std::io::{Read, Write};
@@ -126,7 +127,7 @@ fn read_body(request: &mut Request) -> Option<DownloadBody> {
         .ok()?;
     serde_json::from_str::<DownloadBody>(&body)
         .ok()
-        .filter(|b| b.url.contains("://"))
+        .filter(|b| b.url.contains("://") || b.url.starts_with("magnet:"))
 }
 
 fn reply(status: u16, body: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {

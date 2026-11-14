@@ -14,9 +14,11 @@ use crate::download::SharedDownload;
 use crate::http::Ctx;
 use crate::limiter::Limiter;
 use crate::store::Store;
+use crate::torrent::TorrentClient;
 use crate::util::{now_secs, sanitize_file_name, unique_file_name};
 use crate::{
-    Category, Download, DownloadId, Error, Kind, ProbeResult, RequestInfo, Result, Settings, Status,
+    Category, Download, DownloadId, Error, Kind, ProbeResult, RequestInfo, Result, Settings,
+    Status, TorrentMeta,
 };
 
 const TICK: Duration = Duration::from_millis(500);
@@ -41,15 +43,23 @@ pub struct NewDownload {
     pub category: Category,
     pub request: RequestInfo,
     pub description: String,
+    /// Torrent files and which of them to download.
+    pub torrent: Option<TorrentMeta>,
     /// `false` = "Download Later" (added paused).
     pub start: bool,
 }
 
 impl NewDownload {
     pub fn from_probe(probe: &ProbeResult, request: RequestInfo, settings: &Settings) -> Self {
-        let category = match probe.kind {
-            Kind::Hls => Category::Video,
-            Kind::Http => Category::from_file_name(&probe.file_name),
+        let category = match (probe.kind, &probe.torrent) {
+            (Kind::Hls, _) => Category::Video,
+            // A torrent is filed under the type of its biggest file.
+            (Kind::Torrent, Some(meta)) => meta
+                .files
+                .iter()
+                .max_by_key(|f| f.size)
+                .map_or(Category::Other, |f| Category::from_file_name(&f.path)),
+            _ => Category::from_file_name(&probe.file_name),
         };
         Self {
             url: probe.url.clone(),
@@ -61,6 +71,7 @@ impl NewDownload {
             category,
             request,
             description: String::new(),
+            torrent: probe.torrent.clone(),
             start: true,
         }
     }
@@ -92,6 +103,7 @@ struct Inner {
     client: Client,
     limiter: Arc<Limiter>,
     store: Store,
+    torrents: Arc<TorrentClient>,
     settings: Mutex<Settings>,
     jobs: Mutex<Vec<Job>>,
     next_id: AtomicU64,
@@ -114,7 +126,6 @@ struct Running {
 
 impl Engine {
     pub fn new() -> Result<Self> {
-        let _ = rustls::crypto::ring::default_provider().install_default();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(4)
             .thread_name("rdm-worker")
@@ -139,6 +150,7 @@ impl Engine {
             handle: runtime.handle().clone(),
             client,
             limiter: Arc::new(Limiter::new(settings.speed_limit_kib * 1024)),
+            torrents: Arc::new(TorrentClient::new(store.torrent_dir())),
             store,
             settings: Mutex::new(settings),
             jobs: Mutex::new(jobs),
@@ -190,7 +202,12 @@ impl Engine {
                 d.save_dir == new.save_dir && d.file_name == name && d.status != Status::Completed
             })
         };
-        let file_name = unique_file_name(&new.save_dir, &sanitize_file_name(&new.file_name), taken);
+        let file_name = match new.kind {
+            // Torrent names come from the torrent and an existing folder means
+            // the data is already partly there, so never rename them.
+            Kind::Torrent => sanitize_file_name(&new.file_name),
+            _ => unique_file_name(&new.save_dir, &sanitize_file_name(&new.file_name), taken),
+        };
         let download = Download {
             id,
             url: new.url,
@@ -208,6 +225,7 @@ impl Engine {
             downloaded: 0,
             segments: Vec::new(),
             hls: None,
+            torrent: new.torrent,
             request: new.request,
             added_at: now_secs(),
             last_try: None,
@@ -284,9 +302,10 @@ impl Engine {
             if let Some(task) = task {
                 let _ = task.await;
             }
+            let snapshot = data.lock().unwrap().clone();
+            discard_data(&inner, &snapshot, true).await;
             {
                 let mut d = data.lock().unwrap();
-                let _ = std::fs::remove_file(d.part_path());
                 d.reset_progress();
                 d.status = Status::Queued;
             }
@@ -307,16 +326,14 @@ impl Engine {
         };
         for mut job in removed {
             job.pause();
+            let inner = self.inner.clone();
             self.inner.handle.spawn(async move {
                 // Wait for the connections to close before touching the files.
                 if let Some(running) = job.running.take() {
                     let _ = running.task.await;
                 }
                 let d = job.data.lock().unwrap().clone();
-                let _ = tokio::fs::remove_file(d.part_path()).await;
-                if delete_files && d.status == Status::Completed {
-                    let _ = tokio::fs::remove_file(d.path()).await;
-                }
+                discard_data(&inner, &d, delete_files).await;
             });
         }
         self.inner.changed();
@@ -382,6 +399,7 @@ impl Inner {
             user_agent: settings.user_agent.clone(),
             connections: settings.connections,
             max_retries: settings.max_retries,
+            torrents: self.torrents.clone(),
         }
     }
 
@@ -435,10 +453,14 @@ impl Inner {
             let result = match kind {
                 Kind::Http => crate::http::run(ctx, data.clone(), cancel_rx).await,
                 Kind::Hls => crate::hls::run(ctx, data.clone(), cancel_rx).await,
+                Kind::Torrent => {
+                    let torrents = ctx.torrents.clone();
+                    torrents.run(ctx, data.clone(), cancel_rx).await
+                }
             };
             let result = match result {
-                Ok(()) => finalize(&data).await,
-                err => err,
+                Ok(()) if kind != Kind::Torrent => finalize(&data).await,
+                other => other,
             };
             inner.finished(&data, result);
         });
@@ -502,6 +524,27 @@ impl Inner {
                 .collect()
         };
         self.store.save_downloads(&downloads);
+    }
+}
+
+/// Deletes the temporary data of a download, and with `everything` also the
+/// finished file (or torrent folder).
+async fn discard_data(inner: &Inner, d: &Download, everything: bool) {
+    if let Some(meta) = &d.torrent {
+        inner.torrents.forget(&meta.info_hash).await;
+        if everything {
+            let path = d.path();
+            let _ = if meta.multi_file {
+                tokio::fs::remove_dir_all(path).await
+            } else {
+                tokio::fs::remove_file(path).await
+            };
+        }
+        return;
+    }
+    let _ = tokio::fs::remove_file(d.part_path()).await;
+    if everything && d.status == Status::Completed {
+        let _ = tokio::fs::remove_file(d.path()).await;
     }
 }
 

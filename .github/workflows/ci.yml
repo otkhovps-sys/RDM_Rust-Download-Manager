@@ -27,7 +27,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
-        run: cargo test --all
+        run: cargo test --all -- --nocapture
 
   extension:
     runs-on: ubuntu-latest

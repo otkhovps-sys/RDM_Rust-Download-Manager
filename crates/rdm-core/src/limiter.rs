@@ -26,6 +26,11 @@ impl Limiter {
         }
     }
 
+    /// Bytes per second, `0` = unlimited.
+    pub fn rate(&self) -> u64 {
+        self.rate.load(Ordering::Relaxed)
+    }
+
     pub fn set_rate(&self, rate: u64) {
         self.rate.store(rate, Ordering::Relaxed);
     }

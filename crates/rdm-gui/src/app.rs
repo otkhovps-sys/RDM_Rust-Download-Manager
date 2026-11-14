@@ -16,6 +16,7 @@ use crate::widgets::tool_button;
 /// Everything the user can trigger from the menu, toolbar, list or dialogs.
 pub enum Command {
     AddUrl,
+    OpenTorrent,
     Resume(Vec<DownloadId>),
     Pause(Vec<DownloadId>),
     PauseAll,
@@ -108,6 +109,17 @@ impl RdmApp {
         let engine = &self.engine;
         match command {
             Command::AddUrl => self.dialogs.open_add_url(),
+            Command::OpenTorrent => {
+                let file = rfd::FileDialog::new()
+                    .add_filter("Torrent", &["torrent"])
+                    .set_title("Open torrent file")
+                    .pick_file();
+                if let Some(path) = file {
+                    let source = path.display().to_string();
+                    self.dialogs
+                        .open_file_info(engine, source, Default::default(), None);
+                }
+            }
             Command::Resume(ids) => ids.into_iter().for_each(|id| engine.resume(id)),
             Command::Pause(ids) => ids.into_iter().for_each(|id| engine.pause(id)),
             Command::PauseAll => engine.pause_all(),
@@ -182,6 +194,9 @@ impl RdmApp {
             if i.modifiers.command && i.key_pressed(egui::Key::N) {
                 commands.push(Command::AddUrl);
             }
+            if i.modifiers.command && i.key_pressed(egui::Key::O) {
+                commands.push(Command::OpenTorrent);
+            }
             if i.key_pressed(egui::Key::Delete) {
                 commands.push(Command::Delete(self.table.selected()));
             }
@@ -195,6 +210,9 @@ impl RdmApp {
             ui.menu_button("Tasks", |ui| {
                 if ui.button("Add new download...").clicked() {
                     commands.push(Command::AddUrl);
+                }
+                if ui.button("Open torrent file...").clicked() {
+                    commands.push(Command::OpenTorrent);
                 }
                 ui.separator();
                 if ui.button("Exit").clicked() {

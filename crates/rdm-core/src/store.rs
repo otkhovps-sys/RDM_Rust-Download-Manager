@@ -33,6 +33,11 @@ impl Store {
         Self { dir }
     }
 
+    /// Folder for torrent metadata and DHT state.
+    pub fn torrent_dir(&self) -> PathBuf {
+        self.dir.join("torrents")
+    }
+
     pub fn load_settings(&self) -> Settings {
         load(&self.dir.join("settings.json")).unwrap_or_default()
     }

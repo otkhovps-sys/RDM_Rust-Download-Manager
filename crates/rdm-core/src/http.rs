@@ -35,6 +35,7 @@ pub(crate) struct Ctx {
     pub user_agent: String,
     pub connections: usize,
     pub max_retries: u32,
+    pub torrents: Arc<crate::torrent::TorrentClient>,
 }
 
 impl Ctx {

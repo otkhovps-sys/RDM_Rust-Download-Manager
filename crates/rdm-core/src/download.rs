@@ -28,6 +28,8 @@ pub enum Kind {
     Http,
     /// HLS stream (`.m3u8`), media segments are fetched and joined.
     Hls,
+    /// BitTorrent (magnet link or `.torrent` file).
+    Torrent,
 }
 
 /// One byte range `[start, end)` of the file; `done` bytes are on disk.
@@ -73,6 +75,37 @@ pub struct RequestInfo {
     pub user_agent: Option<String>,
 }
 
+/// One file inside a torrent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TorrentFile {
+    /// Position in the torrent's file list.
+    pub index: usize,
+    /// Path relative to the torrent folder.
+    pub path: String,
+    pub size: u64,
+    /// Download this file (unchecked files are skipped).
+    pub selected: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TorrentMeta {
+    /// Hex encoded info hash; the `.torrent` data is cached under this name.
+    pub info_hash: String,
+    pub files: Vec<TorrentFile>,
+    /// Multi-file torrents get their own folder named after the torrent.
+    pub multi_file: bool,
+}
+
+impl TorrentMeta {
+    pub fn selected_size(&self) -> u64 {
+        self.files
+            .iter()
+            .filter(|f| f.selected)
+            .map(|f| f.size)
+            .sum()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HlsProgress {
     pub total: usize,
@@ -96,6 +129,8 @@ pub struct Download {
     pub downloaded: u64,
     pub segments: Vec<Segment>,
     pub hls: Option<HlsProgress>,
+    #[serde(default)]
+    pub torrent: Option<TorrentMeta>,
     pub request: RequestInfo,
     /// Unix timestamps (seconds).
     pub added_at: u64,
@@ -105,7 +140,7 @@ pub struct Download {
     /// Current transfer rate in bytes/s (runtime only).
     #[serde(skip)]
     pub speed: u64,
-    /// Open connections (runtime only).
+    /// Open connections, or connected peers for torrents (runtime only).
     #[serde(skip)]
     pub connections: usize,
 }

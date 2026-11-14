@@ -42,6 +42,7 @@ async function ping(force = false) {
 }
 
 async function cookiesFor(url) {
+  if (!/^https?:/i.test(url)) return "";
   try {
     const list = await chrome.cookies.getAll({ url });
     return list.map((c) => `${c.name}=${c.value}`).join("; ");
@@ -200,7 +201,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const url = info.linkUrl || info.srcUrl;
-  if (url && /^https?:/i.test(url)) sendToApp({ url, referer: info.pageUrl || tab?.url });
+  if (url && /^(https?|magnet):/i.test(url)) sendToApp({ url, referer: info.pageUrl || tab?.url });
 });
 
 // --------------------------------------------- messages (content / popup)
@@ -213,6 +214,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return mediaOf(tabId);
       case "download":
         return sendToApp({ url: msg.url, referer: msg.referer || sender.tab?.url, fileName: msg.fileName });
+      case "magnet": {
+        // Only take magnet links over while RDM runs and capturing is on.
+        const app = await ping();
+        if (!app || !app.enabled || !(await settings()).capture) return false;
+        return sendToApp({ url: msg.url, referer: sender.tab?.url });
+      }
       case "status":
         return { app: await ping(true), settings: await settings() };
       case "set":
