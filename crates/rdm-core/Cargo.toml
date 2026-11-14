@@ -1,0 +1,27 @@
+[package]
+name = "rdm-core"
+description = "Download engine for RDM: segmented, resumable, multi-connection HTTP + HLS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+thiserror = "2"
+url = "2"
+percent-encoding = "2"
+directories = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+bytes = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net"] }

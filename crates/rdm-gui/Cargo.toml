@@ -1,0 +1,24 @@
+[package]
+name = "rdm-gui"
+description = "RDM - Rust Download Manager, a fast multi-connection download manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rdm"
+path = "src/main.rs"
+
+[dependencies]
+rdm-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "wayland", "x11"] }
+egui_extras = { version = "0.37", default-features = false }
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
+tiny_http = "0.12"
+egui = { version = "0.37", default-features = false }
+arboard = { version = "3", default-features = false }
+open = "5"
