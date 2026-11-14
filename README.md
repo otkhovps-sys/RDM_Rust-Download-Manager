@@ -18,6 +18,10 @@ up downloads, videos and audio from web pages.
   and shows a *Download this video* button over the player. HLS streams
   (`.m3u8`, including AES-128 encrypted ones) are downloaded segment by segment
   and joined into one file.
+- **Torrents** - magnet links, `.torrent` files and `.torrent` URLs, with a
+  checklist to pick which files of the torrent to download. Magnet links
+  clicked in the browser open in RDM. Torrents stop when complete (no
+  seeding afterwards).
 - **Browser integration** - downloads of the file types you choose are taken
   over from Chrome, Edge, Brave and Firefox automatically, with cookies and
   referer so logged-in downloads work. There is also a *Download with RDM*
@@ -59,7 +63,8 @@ If RDM is not running, the browser simply keeps downloading as usual.
 | Action | How |
 | --- | --- |
 | Add a download | *Add URL* (Ctrl+N), the URL is taken from the clipboard |
-| Download from the command line | `rdm https://example.com/file.zip` (passed to the running RDM) |
+| Open a torrent | *Tasks → Open torrent file* (Ctrl+O), or paste a magnet link into *Add URL* |
+| Download from the command line | `rdm https://example.com/file.zip`, `rdm "magnet:?..."` or `rdm file.torrent` (passed to the running RDM) |
 | Pause / resume | toolbar, right-click menu, or the progress window |
 | Open a finished file | double-click it |
 | Show connections | double-click an unfinished download |
@@ -90,6 +95,7 @@ crates/rdm-core     download engine, no GUI code
   src/engine.rs     queue, scheduling, persistence, public API
   src/http.rs       multi-connection segmented HTTP downloader
   src/hls.rs        HLS (.m3u8) downloader with AES-128 support
+  src/torrent.rs    BitTorrent downloads (librqbit)
   src/probe.rs      asks the server for name, size and resume support
   src/limiter.rs    global speed limiter
 crates/rdm-gui      the desktop app (egui), binary name `rdm`
@@ -104,11 +110,13 @@ extension/          browser extension (Manifest V3, Chrome + Firefox)
 
 RDM là trình quản lý tải xuống miễn phí, mã nguồn mở, viết bằng Rust, giao
 diện và cách dùng giống IDM: tải đa luồng (chia nhiều kết nối), tạm dừng /
-tiếp tục, phân loại tệp, hàng đợi, giới hạn tốc độ và tiện ích trình duyệt tự
+tiếp tục, phân loại tệp, hàng đợi, giới hạn tốc độ, tải torrent (magnet, tệp
+`.torrent`, chọn từng tệp) và tiện ích trình duyệt tự
 nhận diện video / âm thanh (kể cả luồng HLS `.m3u8`) để tải bằng một nút bấm.
 Tải bản dựng sẵn ở trang *Releases*, giải nén và chạy `rdm`; cài tiện ích từ
 thư mục `extension` như hướng dẫn ở trên.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Torrent support uses [librqbit](https://github.com/ikatson/rqbit)
+(Apache-2.0).
