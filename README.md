@@ -89,7 +89,16 @@ Requires a recent stable Rust (1.85+).
 cargo build --release
 ```
 
-The binary is `target/release/rdm`. On Linux nothing besides the usual X11 or
+The binary is `target/release/rdm`. This optimized build is slow and uses
+every CPU core for several minutes (whole-program LTO, plus C code from the
+TLS library); that is normal and only happens while compiling. For a much
+quicker build use:
+
+```bash
+cargo build --profile fast-release
+```
+
+and run `target/fast-release/rdm`. On Linux nothing besides the usual X11 or
 Wayland libraries is needed at run time.
 
 ```bash

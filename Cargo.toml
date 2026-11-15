@@ -15,10 +15,19 @@ tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "sync",
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Small, fast release binaries.
+# Small, fast release binaries (used for the published downloads). Building
+# with it takes a long time and keeps every CPU core busy: fat LTO optimizes
+# the whole program at once.
 [profile.release]
 opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Quicker local builds: `cargo build --profile fast-release`
+# (binary ends up in target/fast-release, a little bigger and slower).
+[profile.fast-release]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
