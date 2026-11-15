@@ -39,6 +39,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p rdm-gui
+      - name: Smoke test - the app starts on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:RDM_DATA_DIR = "$env:RUNNER_TEMP\rdm-data"
+          $p = Start-Process -FilePath "target\${{ matrix.target }}\release\rdm.exe" -PassThru
+          Start-Sleep -Seconds 20
+          $log = "$env:RDM_DATA_DIR\crash.log"
+          if (Test-Path $log) { Get-Content $log; throw "RDM wrote crash.log" }
+          if ($p.HasExited) { throw "RDM exited early with code $($p.ExitCode)" }
+          Invoke-RestMethod http://127.0.0.1:9614/ping
+          Stop-Process -Id $p.Id
       - name: Package
         shell: bash
         run: |
@@ -61,8 +73,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Zip extension
-        run: cd extension && zip -r "../rdm-extension-${TAG}.zip" .
+      - name: Zip extension (Chrome, Edge, Brave, Opera)
+        run: cd extension && zip -r "../rdm-extension-chrome-${TAG}.zip" .
+      - name: Zip extension (Firefox)
+        # Firefox runs MV3 background code as a script and needs an add-on id.
+        run: |
+          cp -r extension firefox
+          jq '.background = {"scripts": ["background.js"]}
+              | .browser_specific_settings = {"gecko": {"id": "rdm@rust-download-manager", "strict_min_version": "121.0"}}' \
+            extension/manifest.json > firefox/manifest.json
+          cd firefox && zip -r "../rdm-extension-firefox-${TAG}.zip" .
       - uses: actions/upload-artifact@v4
         with:
           name: extension

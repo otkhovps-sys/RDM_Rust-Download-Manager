@@ -8,6 +8,11 @@ use serde::de::DeserializeOwned;
 
 use crate::{Download, Settings};
 
+/// Folder where RDM keeps its settings, download list and logs.
+pub fn data_dir() -> PathBuf {
+    Store::new().dir
+}
+
 pub(crate) struct Store {
     dir: PathBuf,
 }

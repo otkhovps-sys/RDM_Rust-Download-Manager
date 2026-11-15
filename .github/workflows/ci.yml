@@ -28,6 +28,21 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test --all -- --nocapture
+      - name: Build app
+        if: runner.os == 'Windows'
+        run: cargo build -p rdm-gui
+      - name: Smoke test - the app starts on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:RDM_DATA_DIR = "$env:RUNNER_TEMP\rdm-data"
+          $p = Start-Process -FilePath "target\debug\rdm.exe" -PassThru
+          Start-Sleep -Seconds 20
+          $log = "$env:RDM_DATA_DIR\crash.log"
+          if (Test-Path $log) { Get-Content $log; throw "RDM wrote crash.log" }
+          if ($p.HasExited) { throw "RDM exited early with code $($p.ExitCode)" }
+          Invoke-RestMethod http://127.0.0.1:9614/ping
+          Stop-Process -Id $p.Id
 
   extension:
     runs-on: ubuntu-latest

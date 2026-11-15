@@ -44,6 +44,11 @@ Get the archive for your system from the
 run `rdm` (`rdm.exe` on Windows). Every archive also contains the browser
 extension in the `extension` folder.
 
+On Windows, if SmartScreen says *"Windows protected your PC"*, click
+*More info* → *Run anyway* (the program is not code-signed). If RDM cannot
+start it shows a message and writes `crash.log` to its data folder
+(`%APPDATA%\rdm\data`).
+
 **Portable mode:** put an empty file called `portable` next to the executable
 and RDM keeps its settings and download list in a `data` folder beside it.
 
@@ -52,9 +57,12 @@ and RDM keeps its settings and download list in a `data` folder beside it.
 The extension talks to RDM on `127.0.0.1:9614`; RDM must be running.
 
 - **Chrome / Edge / Brave / Opera**: open `chrome://extensions`, turn on
-  *Developer mode*, click *Load unpacked* and select the `extension` folder.
-- **Firefox**: open `about:debugging#/runtime/this-firefox`, click
-  *Load Temporary Add-on* and select `extension/manifest.json`.
+  *Developer mode*, click *Load unpacked* and select the `extension` folder
+  (or the unpacked `rdm-extension-chrome-*.zip` from the release page).
+- **Firefox**: download `rdm-extension-firefox-*.zip` from the release page,
+  open `about:debugging#/runtime/this-firefox`, click *Load Temporary Add-on*
+  and select that zip file. (Firefox needs its own manifest, so the plain
+  `extension` folder is for Chromium browsers only.)
 
 If RDM is not running, the browser simply keeps downloading as usual.
 

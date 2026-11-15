@@ -22,3 +22,8 @@ tiny_http = "0.12"
 egui = { version = "0.37", default-features = false }
 arboard = { version = "3", default-features = false }
 open = "5"
+
+# Windows: DirectX 12 / Vulkan through wgpu works on far more machines than
+# OpenGL (VMs, remote desktop, old drivers); OpenGL stays as the fallback.
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wgpu"] }

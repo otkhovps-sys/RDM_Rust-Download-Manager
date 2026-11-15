@@ -25,4 +25,5 @@ pub use engine::{Engine, Event, NewDownload, ProbeHandle};
 pub use error::{Error, Result};
 pub use probe::ProbeResult;
 pub use settings::Settings;
+pub use store::data_dir;
 pub use torrent::is_torrent_source;
