@@ -42,7 +42,13 @@ jobs:
           if (Test-Path $log) { Get-Content $log; throw "RDM wrote crash.log" }
           if ($p.HasExited) { throw "RDM exited early with code $($p.ExitCode)" }
           Invoke-RestMethod http://127.0.0.1:9614/ping
+          # Idle CPU must stay near zero (no busy redraw loop).
+          $before = (Get-Process -Id $p.Id).TotalProcessorTime.TotalSeconds
+          Start-Sleep -Seconds 15
+          $used = (Get-Process -Id $p.Id).TotalProcessorTime.TotalSeconds - $before
+          Write-Host ("Idle CPU over 15 s: {0:N2} s ({1:N1}% of one core)" -f $used, ($used / 15 * 100))
           Stop-Process -Id $p.Id
+          if ($used -gt 1.5) { throw "RDM uses too much CPU while idle" }
 
   extension:
     runs-on: ubuntu-latest
