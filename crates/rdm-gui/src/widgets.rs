@@ -42,6 +42,25 @@ pub fn tool_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Respo
     response
 }
 
+/// A small rotating arc. Unlike `egui::Spinner`, which redraws the whole
+/// window at full frame rate, this one asks for only 10 frames per second -
+/// much cheaper on machines that render in software.
+pub fn busy_indicator(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+    let t = ui.input(|i| i.time) as f32;
+    let start = t * std::f32::consts::TAU;
+    let points: Vec<_> = (0..=12)
+        .map(|i| {
+            let a = start + i as f32 / 12.0 * std::f32::consts::PI * 1.5;
+            rect.center() + 6.0 * egui::vec2(a.cos(), a.sin())
+        })
+        .collect();
+    let stroke = egui::Stroke::new(2.0, ui.visuals().strong_text_color());
+    ui.painter().add(egui::Shape::line(points, stroke));
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(100));
+}
+
 /// Horizontal bar showing which parts of the file are already downloaded,
 /// one block per connection - like IDM's progress details.
 pub fn segment_map(ui: &mut Ui, d: &Download) {

@@ -140,7 +140,7 @@ impl FileInfo {
             match &mut self.state {
                 State::Probing(_) => {
                     ui.horizontal(|ui| {
-                        ui.spinner();
+                        crate::widgets::busy_indicator(ui);
                         ui.label("Getting file information...");
                     });
                     if rdm_core::is_torrent_source(&self.url) {

@@ -29,6 +29,8 @@ fn main() {
     for renderer in renderers() {
         let options = eframe::NativeOptions {
             renderer,
+            #[cfg(windows)]
+            wgpu_options: low_power_gpu(),
             viewport: egui::ViewportBuilder::default()
                 .with_title("RDM - Rust Download Manager")
                 .with_app_id("rdm")
@@ -60,6 +62,19 @@ fn renderers() -> Vec<eframe::Renderer> {
     return vec![eframe::Renderer::Wgpu, eframe::Renderer::Glow];
     #[cfg(not(windows))]
     return vec![eframe::Renderer::Glow];
+}
+
+/// A download manager never needs the discrete GPU of a laptop; the
+/// integrated one saves power (still overridable with `WGPU_POWER_PREF`).
+#[cfg(windows)]
+fn low_power_gpu() -> eframe::WgpuConfiguration {
+    let mut config = eframe::WgpuConfiguration::default();
+    if std::env::var_os("WGPU_POWER_PREF").is_none()
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut config.wgpu_setup
+    {
+        setup.power_preference = eframe::wgpu::PowerPreference::LowPower;
+    }
+    config
 }
 
 /// The release build has no console, so errors go to `crash.log` in the data
