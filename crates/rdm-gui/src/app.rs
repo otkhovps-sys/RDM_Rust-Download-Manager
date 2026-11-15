@@ -1,7 +1,13 @@
 //! Main window: menu, toolbar, category tree, download list and status bar.
 
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// egui redraws on every mouse move; more than this is wasted CPU for a
+/// download manager (and high refresh monitors would double or triple it).
+const MIN_FRAME_TIME: Duration = Duration::from_millis(33);
+/// How often the download list snapshot is taken from the engine.
+const LIST_REFRESH: Duration = Duration::from_millis(250);
 
 use egui::{Color32, RichText, Ui};
 use rdm_core::util::format_speed;
@@ -66,6 +72,9 @@ pub struct RdmApp {
     filter: Filter,
     table: DownloadTable,
     dialogs: Dialogs,
+    last_frame: Instant,
+    /// `None` forces a refresh on the next frame.
+    list_taken: Option<Instant>,
 }
 
 impl RdmApp {
@@ -96,6 +105,8 @@ impl RdmApp {
             messages,
             server_error,
             downloads: Vec::new(),
+            last_frame: Instant::now(),
+            list_taken: None,
             filter: Filter {
                 group: Group::All,
                 category: None,
@@ -172,6 +183,7 @@ impl RdmApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         for event in self.engine.poll_events() {
+            self.list_taken = None;
             match event {
                 Event::Completed(id) => {
                     self.dialogs.close_progress(id);
@@ -390,9 +402,19 @@ impl RdmApp {
 impl eframe::App for RdmApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Cap the frame rate: input that arrives meanwhile is simply handled
+        // together in the next frame.
+        if let Some(wait) = MIN_FRAME_TIME.checked_sub(self.last_frame.elapsed()) {
+            std::thread::sleep(wait);
+        }
+        self.last_frame = Instant::now();
+
         self.poll(&ctx);
-        self.downloads = self.engine.list();
-        self.table.retain_existing(&self.downloads);
+        if self.list_taken.is_none_or(|t| t.elapsed() >= LIST_REFRESH) {
+            self.downloads = self.engine.list();
+            self.table.retain_existing(&self.downloads);
+            self.list_taken = Some(Instant::now());
+        }
 
         let mut commands = self.shortcuts(&ctx);
         egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui, &mut commands));
@@ -414,6 +436,9 @@ impl eframe::App for RdmApp {
         });
         commands.extend(self.dialogs.show(&ctx, &self.engine, &self.downloads));
 
+        if !commands.is_empty() {
+            self.list_taken = None; // show the effect right away
+        }
         for command in commands {
             self.execute(&ctx, command);
         }

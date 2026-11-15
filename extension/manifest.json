@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "RDM - Rust Download Manager",
   "short_name": "RDM",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Send downloads, videos, audio and torrents to RDM, the fast multi-connection download manager.",
   "icons": {
     "16": "icons/16.png",

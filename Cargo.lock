@@ -3688,7 +3688,7 @@ dependencies = [
 
 [[package]]
 name = "rdm-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "aes",
  "bytes",
@@ -3708,7 +3708,7 @@ dependencies = [
 
 [[package]]
 name = "rdm-gui"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "arboard",
  "eframe",
