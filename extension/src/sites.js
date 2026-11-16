@@ -27,6 +27,9 @@ const SITES = [
   { name: "Kick", host: /(^|\.)kick\.com$/, path: /^\/([^/]+\/)?(videos|clips)\// },
 ];
 
+// Sites where every other page is a feed or a profile showing many videos.
+const FEED_SITES = new Set(["TikTok", "Douyin", "Instagram", "Pinterest"]);
+
 // Hosts that only ever serve stream pieces; never list their requests.
 const STREAM_HOSTS = /(^|\.)googlevideo\.com$/;
 
@@ -38,6 +41,22 @@ export function videoSite(url) {
     return site ? site.name : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Whether `url` is a page of a video site that lists videos (home page,
+ * feed, profile). Its address says nothing about the video being watched,
+ * so it must never be sent to RDM in place of the video's own page.
+ */
+export function isFeed(url) {
+  try {
+    const { hostname, pathname } = new URL(url);
+    const site = SITES.find((s) => s.host.test(hostname));
+    if (!site || SITES.some((s) => s.host.test(hostname) && s.path.test(pathname))) return false;
+    return pathname === "/" || FEED_SITES.has(site.name);
+  } catch {
+    return false;
   }
 }
 

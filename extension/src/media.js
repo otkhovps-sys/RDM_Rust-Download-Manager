@@ -1,7 +1,7 @@
 // Notices video and audio a page loads (per tab, from response headers) and
 // decides which of them is "the video" the user most likely wants.
 
-import { isStreamHost, videoSite } from "./sites.js";
+import { isFeed, isStreamHost, videoSite } from "./sites.js";
 
 const MEDIA_EXT = /\.(m3u8|mpd|mp4|m4v|webm|mkv|mov|flv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i;
 // Pieces of a stream (HLS / DASH fragments) are useless on their own.
@@ -66,6 +66,15 @@ const fileNameOf = (url) => {
   }
 };
 
+/** "@name" from addresses like tiktok.com/@name/video/1, else "". */
+const authorOf = (url) => {
+  try {
+    return new URL(url).pathname.match(/^\/(@[\w.-]+)\//)?.[1] || "";
+  } catch {
+    return "";
+  }
+};
+
 /** Adds the texts the popup and the page button show: `title` and `detail`. */
 function describe(item, media) {
   const facts = [hostOf(item.url)];
@@ -73,7 +82,8 @@ function describe(item, media) {
   switch (item.kind) {
     case "page":
       title = item.site ? `${item.site} video` : "Video on this page";
-      facts.push("choose the quality in RDM");
+      // In a feed the author's name shows that the right video was found.
+      facts.splice(0, 1, authorOf(item.url) || facts[0], "pick the quality in RDM");
       break;
     case "hls":
     case "dash":
@@ -111,8 +121,8 @@ function normalize(url) {
  *
  * `context` describes what the user is looking at:
  *   pageUrl     address of the page (or frame)
- *   links       links around the video, nearest first (feeds such as TikTok
- *               link each video to its own page)
+ *   links       the video's own page if the content script could work it
+ *               out, then the links around the video, nearest first
  *   currentSrc  address the video element plays, `media` its size/duration
  *   hasVideo    a video element is there, even if its stream is hidden
  *
@@ -140,9 +150,10 @@ export async function listFor(tabId, context = {}) {
   const streams = requests.filter((r) => r.kind !== "file" && !streamHosts.has(hostOf(r.url)) && streamHosts.add(hostOf(r.url)));
   candidates.push(...streams);
 
-  // A player that hides its stream: let yt-dlp examine the page. Without a
+  // A player that hides its stream: let yt-dlp examine the page - but never
+  // a feed, whose address does not say which video is meant. Without a
   // video in sight (toolbar popup) loaded files are the better guess.
-  const page = pageUrl && !siteUrl ? { kind: "page", url: pageUrl, site: "" } : null;
+  const page = pageUrl && !siteUrl && !isFeed(pageUrl) ? { kind: "page", url: pageUrl, site: "" } : null;
   if (page && context.hasVideo) candidates.push(page);
 
   const listed = new Set(candidates.map((c) => c.url));

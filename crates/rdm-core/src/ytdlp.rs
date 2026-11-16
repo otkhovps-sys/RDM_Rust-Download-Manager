@@ -66,9 +66,14 @@ pub(crate) fn is_video_site(url: &str) -> bool {
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Info {
+    id: Option<String>,
     title: Option<String>,
+    description: Option<String>,
+    /// The account's name (on TikTok the "@name").
+    uploader: Option<String>,
+    channel: Option<String>,
     #[serde(default)]
     formats: Vec<Format>,
 }
@@ -97,6 +102,74 @@ impl Format {
     }
 }
 
+/// Longest name (without extension) a video gets; yt-dlp adds its own
+/// suffixes while it works and Windows paths are short.
+const MAX_NAME: usize = 80;
+
+/// A readable file name (without extension) for the video.
+///
+/// Sites with real titles (YouTube, ...) keep them. Short-video sites
+/// (TikTok, Reels, ...) have none: there yt-dlp passes the caption, usually
+/// a long row of hashtags and emoji that repeats from video to video. Such
+/// videos are named "<author> - <caption without hashtags>", or
+/// "<author> - <video id>" when nothing readable is left.
+fn name_for(info: &Info) -> String {
+    fn text(field: &Option<String>) -> Option<&str> {
+        field.as_deref().map(str::trim).filter(|t| !t.is_empty())
+    }
+    let id = text(&info.id);
+    // Without a title yt-dlp makes one up: "<site> video #<id>".
+    let title = text(&info.title).filter(|t| !id.is_some_and(|id| t.ends_with(&format!("#{id}"))));
+    let is_caption = title.is_none() || title == text(&info.description);
+
+    let name = if is_caption {
+        let caption = shorten(&plain_words(title.unwrap_or_default()));
+        let author = text(&info.uploader).or(text(&info.channel));
+        let rest = Some(caption.as_str()).filter(|c| !c.is_empty()).or(id);
+        match (author, rest) {
+            (Some(author), Some(rest)) => format!("{author} - {rest}"),
+            (author, rest) => author.or(rest).unwrap_or("video").to_owned(),
+        }
+    } else {
+        let words: Vec<&str> = title.unwrap_or_default().split_whitespace().collect();
+        shorten(&words.join(" "))
+    };
+    sanitize_file_name(&name)
+}
+
+/// The caption's words without hashtags, emoji and line breaks.
+fn plain_words(caption: &str) -> String {
+    let is_symbol = |c: char| {
+        matches!(u32::from(c),
+            0x200B..=0x200F | 0x2600..=0x27BF | 0x2B00..=0x2BFF | 0xFE00..=0xFE0F | 0x1F000..=0x1FAFF | 0xE0000..=0xE007F)
+    };
+    let letters: String = caption.chars().filter(|c| !is_symbol(*c)).collect();
+    let words: Vec<&str> = letters
+        .split_whitespace()
+        .filter(|word| !word.starts_with('#'))
+        .collect();
+    words.join(" ")
+}
+
+/// Cuts `text` to at most [`MAX_NAME`] characters, at a word where possible.
+fn shorten(text: &str) -> String {
+    if text.chars().count() <= MAX_NAME {
+        return text.to_owned();
+    }
+    let cut: String = text.chars().take(MAX_NAME).collect();
+    let whole_words = cut
+        .rsplit_once(' ')
+        .map_or(cut.as_str(), |(words, _)| words);
+    // One very long word (or a language without spaces): keep the plain cut.
+    let kept = if whole_words.chars().count() >= MAX_NAME / 2 {
+        whole_words
+    } else {
+        &cut
+    };
+    kept.trim_end_matches(|c: char| c.is_whitespace() || ",.;:-".contains(c))
+        .to_owned()
+}
+
 /// Asks yt-dlp what the page offers, without downloading.
 pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<ProbeResult> {
     let ytdlp = ctx.tools.require(Tool::YtDlp)?;
@@ -111,7 +184,7 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
     };
 
     let options = options(&info.formats, ctx.tools.find(Tool::Ffmpeg).is_some());
-    let title = sanitize_file_name(info.title.as_deref().unwrap_or("video"));
+    let title = name_for(&info);
     Ok(ProbeResult {
         url: url.to_owned(),
         file_name: format!("{title}.{}", options[0].ext),
@@ -517,6 +590,58 @@ mod tests {
         let without = options(&formats, false);
         let labels: Vec<_> = without.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, ["360p", "Audio only (M4A)"]);
+    }
+
+    fn info(title: &str, description: &str, uploader: &str, id: &str) -> Info {
+        let field = |text: &str| Some(text.to_owned()).filter(|t| !t.is_empty());
+        Info {
+            id: field(id),
+            title: field(title),
+            description: field(description),
+            uploader: field(uploader),
+            ..Info::default()
+        }
+    }
+
+    #[test]
+    fn names_videos() {
+        // A real title stays, whatever the description says.
+        let video = info(
+            "Rust in 100 Seconds  #shorts",
+            "Learn Rust...",
+            "Fireship",
+            "5C_HPTJg5ek",
+        );
+        assert_eq!(name_for(&video), "Rust in 100 Seconds #shorts");
+
+        // TikTok: the "title" is the caption.
+        let caption = "Mèo con đi lạc 🐱✨ về nhà rồi\n#meo #fyp #xuhuong #viral";
+        let video = info(caption, caption, "meo.cute", "7706387837360311573");
+        assert_eq!(name_for(&video), "meo.cute - Mèo con đi lạc về nhà rồi");
+
+        // Nothing but hashtags, or no caption at all: the id tells videos apart.
+        let video = info(
+            "#fyp #viral",
+            "#fyp #viral",
+            "meo.cute",
+            "7706387837360311573",
+        );
+        assert_eq!(name_for(&video), "meo.cute - 7706387837360311573");
+        let video = info(
+            "TikTok video #7706387837360311573",
+            "",
+            "meo.cute",
+            "7706387837360311573",
+        );
+        assert_eq!(name_for(&video), "meo.cute - 7706387837360311573");
+        assert_eq!(name_for(&Info::default()), "video");
+
+        // Long captions end at a word.
+        let caption = "word ".repeat(60);
+        let video = info(&caption, &caption, "someone", "1");
+        let name = name_for(&video);
+        assert!(name.starts_with("someone - word word") && name.ends_with("word"));
+        assert_eq!(name.chars().count(), "someone - ".len() + 79);
     }
 
     #[test]

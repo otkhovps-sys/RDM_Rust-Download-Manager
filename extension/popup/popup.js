@@ -35,7 +35,9 @@ function rowFor(tab, item, best) {
 }
 
 async function showPage(tab) {
-  const context = { pageUrl: tab.url, offerPage: true };
+  // The page tells which video is being watched (in a feed: its own page).
+  const watching = await chrome.tabs.sendMessage(tab.id, { type: "context" }, { frameId: 0 }).catch(() => null);
+  const context = { ...watching, pageUrl: tab.url, offerPage: true };
   const { primary, others } = (await send({ type: "list", tabId: tab.id, context })) || { primary: null, others: [] };
   $("found").hidden = !primary;
   $("empty").hidden = Boolean(primary);

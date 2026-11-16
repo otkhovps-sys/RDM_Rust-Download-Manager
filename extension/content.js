@@ -131,17 +131,49 @@
     { passive: true }
   );
 
+  /** The boxes around a video that hold no other video, innermost first. */
+  function* boxesOf(video) {
+    for (let box = video.parentElement; box; box = box.parentElement) {
+      if (box.querySelectorAll("video").length > 1) return;
+      yield box;
+    }
+  }
+
   /**
-   * Links around the video, nearest first. In feeds (TikTok, Reels, ...)
-   * every video sits in its own box that links to the video's own page;
-   * the search stops where a box starts to hold other videos as well.
+   * Feeds that do not link a video to its own page. There the address is
+   * put together from what the player carries; "" when that fails.
+   */
+  const FEEDS = [
+    {
+      // TikTok: the player box is named "xgwrapper-<n>-<video id>" and the
+      // author's "/@name" link sits in the same card.
+      host: /(^|\.)tiktok\.com$/,
+      pageOf(video) {
+        let id = "";
+        let author = "";
+        for (const box of boxesOf(video)) {
+          id ||= box.id.match(/(?:^|\D)(\d{15,20})$/)?.[1] || "";
+          author ||= box.querySelector('a[href^="/@"]')?.getAttribute("href").match(/^\/@([\w.-]+)/)?.[1] || "";
+          if (id && author) break;
+        }
+        return id ? `https://www.tiktok.com/@${author}/video/${id}` : "";
+      },
+    },
+  ];
+
+  /**
+   * The video's own page where known, then the links around the video,
+   * nearest first: most feeds (Reels, Shorts, ...) put every video in a box
+   * that links to its page.
    */
   function linksAround(video) {
     const links = new Set();
-    for (let box = video.parentElement; box && links.size < MAX_LINKS; box = box.parentElement) {
-      if (box.querySelectorAll("video").length > 1) break;
+    const own = FEEDS.find((feed) => feed.host.test(location.hostname))?.pageOf(video);
+    if (own) links.add(own);
+    for (const box of boxesOf(video)) {
       for (const a of box.querySelectorAll("a[href]")) {
-        if (links.size < MAX_LINKS) links.add(a.href);
+        if (links.size >= MAX_LINKS) return [...links];
+        links.add(a.href);
       }
     }
     return [...links];
@@ -156,6 +188,27 @@
       media: { width: video.videoWidth, height: video.videoHeight, duration: video.duration },
     };
   }
+
+  /** The video the user is watching: the largest one in view. */
+  function mainVideo() {
+    let best = null;
+    let bestArea = 0;
+    for (const video of document.querySelectorAll("video")) {
+      const r = video.getBoundingClientRect();
+      const width = Math.min(r.right, window.innerWidth) - Math.max(r.left, 0);
+      const height = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+      if (r.width < MIN_WIDTH || r.height < MIN_HEIGHT || width <= 0 || height <= 0) continue;
+      if (width * height > bestArea) [best, bestArea] = [video, width * height];
+    }
+    return best;
+  }
+
+  // The toolbar popup asks what is being watched (top frame only).
+  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (message?.type !== "context") return;
+    const video = mainVideo();
+    reply(video ? contextOf(video) : null);
+  });
 
   function rowFor(item, best) {
     const row = element("div", best ? "row best" : "row");
