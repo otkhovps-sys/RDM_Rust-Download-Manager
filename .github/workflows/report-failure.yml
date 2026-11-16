@@ -1,0 +1,34 @@
+name: Report failure
+
+# Opens an issue with the end of the log of every failed job, so a broken
+# build or release is noticed (and can be diagnosed) without watching Actions.
+on:
+  workflow_call:
+    inputs:
+      title:
+        required: true
+        type: string
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+        run: |
+          run="repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          {
+            echo "$TITLE: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (commit $GITHUB_SHA)"
+            gh api "$run/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "failure") | "\(.id) \(.name)"' |
+            while read -r id name; do
+              printf '\n### %s\n\n```\n' "$name"
+              gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" | tail -n 70 | cut -c 30-330
+              printf '```\n'
+            done
+          } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file body.md

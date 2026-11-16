@@ -39,14 +39,15 @@ pub fn show_credits(ctx: &Context) -> bool {
         ui.set_width(460.0);
         egui::ScrollArea::vertical()
             .max_height(360.0)
+            .auto_shrink([false, true])
             .show(ui, |ui| {
-                for line in CREDITS.lines() {
-                    let line = line.trim();
+                // The window title already says "Credits".
+                for line in CREDITS.lines().skip(1).map(str::trim) {
                     if let Some(heading) = line.strip_prefix('#') {
                         ui.add_space(6.0);
                         ui.label(RichText::new(heading.trim_start_matches('#').trim()).strong());
                     } else if let Some((text, url)) = line.rsplit_once(" - https://") {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(text.trim_start_matches("- "));
                             ui.hyperlink_to("link", format!("https://{url}"));
                         });

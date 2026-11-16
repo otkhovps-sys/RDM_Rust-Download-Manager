@@ -18,6 +18,14 @@ up downloads, videos and audio from web pages.
   and shows a *Download this video* button over the player. HLS streams
   (`.m3u8`, including AES-128 encrypted ones) are downloaded segment by segment
   and joined into one file.
+- **YouTube and other video sites** - on video pages the button sends the
+  page to RDM, which lists the available qualities (up to 4K, or audio only
+  as MP3) and downloads through [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+  yt-dlp and ffmpeg are not bundled: RDM offers to download the official
+  builds the first time they are needed and verifies their checksums.
+- **System tray** - closing the window keeps RDM and its downloads running in
+  the tray; the tray menu shows, adds, stops and resumes downloads, and
+  *Exit* really quits.
 - **Torrents** - magnet links, `.torrent` files and `.torrent` URLs, with a
   checklist to pick which files of the torrent to download. Magnet links
   clicked in the browser open in RDM. Torrents stop when complete (no
@@ -35,14 +43,22 @@ up downloads, videos and audio from web pages.
   browser engine. Idle CPU use is zero.
 
 > RDM does not download DRM protected streams (for example Netflix or Widevine
-> content). Respect the terms of the sites you use.
+> content). Only download what you have the right to, and respect the terms
+> of the sites you use.
 
 ## Download
 
-Get the archive for your system from the
-[Releases page](https://github.com/otkhovps-sys/rdm/releases), unpack it and
-run `rdm` (`rdm.exe` on Windows). Every archive also contains the browser
-extension in the `extension` folder.
+Everything is on the
+[Releases page](https://github.com/otkhovps-sys/rdm/releases):
+
+- **Windows installer** (`rdm-<version>-setup.exe`) - installs for the current
+  user without administrator rights, adds Start menu and optional desktop
+  shortcuts, and can start RDM with Windows and open `.torrent` files and
+  magnet links with it. Uninstall from *Settings → Apps* as usual.
+- **Portable archives** for Windows, Linux and macOS - unpack and run `rdm`
+  (`rdm.exe` on Windows).
+
+Both contain the browser extension in the `extension` folder.
 
 On Windows, if SmartScreen says *"Windows protected your PC"*, click
 *More info* → *Run anyway* (the program is not code-signed). If RDM cannot
@@ -71,6 +87,8 @@ If RDM is not running, the browser simply keeps downloading as usual.
 | Action | How |
 | --- | --- |
 | Add a download | *Add URL* (Ctrl+N), the URL is taken from the clipboard |
+| Download from YouTube etc. | *Download this video* button on the page, or paste the page address into *Add URL*; then pick the quality |
+| Keep RDM in the background | close the window - it stays in the system tray (*Options → General* turns this off) |
 | Open a torrent | *Tasks → Open torrent file* (Ctrl+O), or paste a magnet link into *Add URL* |
 | Download from the command line | `rdm https://example.com/file.zip`, `rdm "magnet:?..."` or `rdm file.torrent` (passed to the running RDM) |
 | Pause / resume | toolbar, right-click menu, or the progress window |
@@ -113,14 +131,21 @@ crates/rdm-core     download engine, no GUI code
   src/http.rs       multi-connection segmented HTTP downloader
   src/hls.rs        HLS (.m3u8) downloader with AES-128 support
   src/torrent.rs    BitTorrent downloads (librqbit)
+  src/ytdlp.rs      video pages (YouTube, ...) through yt-dlp
+  src/tools.rs      finds / installs the helper programs yt-dlp and ffmpeg
   src/probe.rs      asks the server for name, size and resume support
   src/limiter.rs    global speed limiter
 crates/rdm-gui      the desktop app (egui), binary name `rdm`
   src/app.rs        main window: menu, toolbar, categories, status bar
   src/table.rs      download list
   src/dialogs/      add URL, file info, progress, options, ...
+  src/tray.rs       system tray icon and menu
   src/server.rs     local endpoint for the browser extension
 extension/          browser extension (Manifest V3, Chrome + Firefox)
+  background.js     entry point; the modules live in src/
+  content.js        "Download this video" button, magnet links
+  popup/            toolbar popup
+installer/rdm.iss   Windows installer (Inno Setup)
 ```
 
 ## Tiếng Việt
@@ -128,12 +153,13 @@ extension/          browser extension (Manifest V3, Chrome + Firefox)
 RDM là trình quản lý tải xuống miễn phí, mã nguồn mở, viết bằng Rust, giao
 diện và cách dùng giống IDM: tải đa luồng (chia nhiều kết nối), tạm dừng /
 tiếp tục, phân loại tệp, hàng đợi, giới hạn tốc độ, tải torrent (magnet, tệp
-`.torrent`, chọn từng tệp) và tiện ích trình duyệt tự
+`.torrent`, chọn từng tệp), tải video YouTube và nhiều trang khác (chọn chất
+lượng, qua yt-dlp), chạy ngầm dưới khay hệ thống và tiện ích trình duyệt tự
 nhận diện video / âm thanh (kể cả luồng HLS `.m3u8`) để tải bằng một nút bấm.
-Tải bản dựng sẵn ở trang *Releases*, giải nén và chạy `rdm`; cài tiện ích từ
-thư mục `extension` như hướng dẫn ở trên.
+Trên Windows hãy tải bộ cài `rdm-<phiên bản>-setup.exe` ở trang *Releases*;
+cài tiện ích từ thư mục `extension` như hướng dẫn ở trên.
 
 ## License
 
-[MIT](LICENSE). Torrent support uses [librqbit](https://github.com/ikatson/rqbit)
-(Apache-2.0).
+[MIT](LICENSE). The projects RDM builds on are listed in
+[CREDITS.md](CREDITS.md) (also under *Help → Credits* in the app).

@@ -1,27 +1,68 @@
 name: Release
 
-# Builds binaries for every platform and publishes them, together with the
-# browser extension, as a GitHub release. Start it by pushing a tag like
-# `v1.0.0`, or run it by hand ("Run workflow") with the version to release;
-# the tag is then created by the release step.
+# Builds RDM for every platform and publishes a GitHub release with the
+# Windows installer, the portable archives and the browser extension.
+#
+# A release is made when
+#   * the version in Cargo.toml on the default branch has no release yet
+#     (so: bump the version, push, done),
+#   * a tag like `v1.2.0` is pushed, or
+#   * the workflow is run by hand with a version.
 on:
   push:
+    branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. v1.0.0"
+        description: "Version to release, e.g. v1.2.0"
         required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.version || github.ref_name }}
 
 jobs:
+  plan:
+    # Branch pushes only count on the default branch.
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' ||
+      github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "branch" ]; then
+            tag="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              release=false
+            else
+              release=true
+            fi
+          else
+            tag="${INPUT:-$GITHUB_REF_NAME}"
+            release=true
+          fi
+          echo "tag=$tag, release=$release"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +72,8 @@ jobs:
           - { os: macos-latest, target: aarch64-apple-darwin, exe: rdm }
           - { os: macos-latest, target: x86_64-apple-darwin, exe: rdm }
     runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -57,20 +100,56 @@ jobs:
           name="rdm-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/$name/"
-          cp -r extension README.md LICENSE "dist/$name/"
+          cp -r extension README.md LICENSE CREDITS.md "dist/$name/"
           cd dist
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a "$name.zip" "$name" > /dev/null
           else
             tar czf "$name.tar.gz" "$name"
           fi
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $env:RDM_VERSION = $env:TAG.TrimStart("v")
+          $env:RDM_SOURCE = (Resolve-Path "dist\rdm-${env:TAG}-${{ matrix.target }}").Path
+          & $iscc installer\rdm.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          Copy-Item installer\Output\*.exe dist\
+      - name: Smoke test - install, start, uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\rdm-installed"
+          $setup = (Get-Item dist\*-setup.exe).FullName
+          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`"" -Wait
+          if (!(Test-Path "$dir\rdm.exe")) { throw "rdm.exe was not installed" }
+          if (!(Test-Path "$dir\extension\manifest.json")) { throw "the extension was not installed" }
+          $env:RDM_DATA_DIR = "$env:RUNNER_TEMP\rdm-data-2"
+          $p = Start-Process -FilePath "$dir\rdm.exe" -ArgumentList "--minimized" -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "the installed RDM exited early" }
+          Invoke-RestMethod http://127.0.0.1:9614/ping
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          # The uninstaller finishes its work in a second process.
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\rdm.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\rdm.exe") { throw "uninstall left rdm.exe behind" }
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/*.*z*
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*-setup.exe
 
   extension:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - name: Zip extension (Chrome, Edge, Brave, Opera)
@@ -79,7 +158,7 @@ jobs:
         # Firefox runs MV3 background code as a script and needs an add-on id.
         run: |
           cp -r extension firefox
-          jq '.background = {"scripts": ["background.js"]}
+          jq '.background = {"scripts": ["background.js"], "type": "module"}
               | .browser_specific_settings = {"gecko": {"id": "rdm@rust-download-manager", "strict_min_version": "121.0"}}' \
             extension/manifest.json > firefox/manifest.json
           cd firefox && zip -r "../rdm-extension-firefox-${TAG}.zip" .
@@ -89,8 +168,10 @@ jobs:
           path: rdm-extension-*.zip
 
   publish:
-    needs: [build, extension]
+    needs: [plan, build, extension]
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -103,3 +184,13 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: artifacts/*
           generate_release_notes: true
+
+  report-failure:
+    needs: [plan, build, extension, publish]
+    if: failure()
+    uses: ./.github/workflows/report-failure.yml
+    with:
+      title: Release ${{ needs.plan.outputs.tag }} failed
+    permissions:
+      issues: write
+      actions: read

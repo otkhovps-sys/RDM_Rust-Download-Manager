@@ -59,5 +59,16 @@ jobs:
           node-version: 22
       - name: Syntax check
         run: |
-          for f in extension/*.js; do node --check "$f"; done
+          for f in extension/content.js extension/popup/*.js; do node --check "$f"; done
+          for f in extension/background.js extension/src/*.js; do node --input-type=module --check < "$f"; done
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
+
+  report-failure:
+    needs: [check, extension]
+    if: failure()
+    uses: ./.github/workflows/report-failure.yml
+    with:
+      title: CI failed
+    permissions:
+      issues: write
+      actions: read
