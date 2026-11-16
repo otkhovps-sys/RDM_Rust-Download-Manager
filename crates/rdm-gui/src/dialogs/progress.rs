@@ -8,12 +8,14 @@ use egui::{Color32, Context, Id, RichText, Sense, Ui, vec2};
 use rdm_core::util::{format_bytes, format_duration, format_speed};
 use rdm_core::{Download, DownloadId, Kind, Status};
 
-use super::{primary_button, window};
+use super::primary_button;
 use crate::app::Command;
 use crate::icons;
 use crate::widgets::segment_map;
 
 const WIDTH: f32 = 480.0;
+/// Space between the window's edge and its content.
+const MARGIN: f32 = 14.0;
 /// The speed graph holds one sample per half second: the last minute.
 const SAMPLE_EVERY: Duration = Duration::from_millis(500);
 const MAX_SAMPLES: usize = 120;
@@ -28,6 +30,8 @@ pub struct Progress {
     /// Recent transfer rates, oldest first.
     speeds: VecDeque<u64>,
     sampled: Instant,
+    /// Size of the window; follows its content.
+    size: egui::Vec2,
 }
 
 impl Progress {
@@ -36,58 +40,92 @@ impl Progress {
             id,
             speeds: VecDeque::new(),
             sampled: Instant::now(),
+            size: egui::vec2(WIDTH + 2.0 * MARGIN, 330.0),
         }
     }
 
+    /// Shows the download in a window of its own (or, where the system
+    /// cannot open more windows, inside the main one). Returns `false` once
+    /// it is closed.
     pub fn show(&mut self, ctx: &Context, d: &Download, commands: &mut Vec<Command>) -> bool {
         self.sample(d);
-        let mut open = true;
-        let mut cancel = false;
         let title = match percent(d) {
             Some(percent) => format!("{percent}% {}", d.file_name),
             None => d.file_name.clone(),
         };
-        window(ctx, title, Id::unique(("progress", d.id)), d.id)
-            .open(&mut open)
-            .show(ctx, |ui| {
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size(self.size)
+            .with_resizable(false)
+            .with_maximize_button(false)
+            .with_icon(icons::app_icon());
+        let id = egui::ViewportId::from_hash_of(("progress", d.id));
+        ctx.show_viewport_immediate(id, builder, |ui, class| {
+            if class == egui::ViewportClass::EmbeddedWindow {
                 ui.set_width(WIDTH);
-                header(ui, d);
-                ui.add_space(10.0);
-                amount(ui, d);
-                ui.add_space(4.0);
-                segment_map(ui, d, state_color(d));
-                ui.add_space(6.0);
-                status_line(ui, d);
-                ui.add_space(10.0);
-                tiles(ui, d);
-                ui.add_space(8.0);
-                speed_graph(ui, &self.speeds, state_color(d));
-
-                // Whether the details are open is remembered for all
-                // progress windows until RDM is closed.
-                let details_id = Id::unique("progress-details");
-                let mut details = ctx.data(|data| data.get_temp(details_id).unwrap_or(false));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let toggle = if details {
-                        "Hide details"
-                    } else {
-                        "Show details"
-                    };
-                    if ui.button(toggle).clicked() {
-                        details = !details;
-                        ctx.data_mut(|data| data.insert_temp(details_id, details));
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        cancel = buttons(ui, d, commands);
-                    });
-                });
-                if details {
-                    ui.separator();
-                    self::details(ui, d);
+                return !self.content(ui, d, commands);
+            }
+            let frame = egui::Frame::new()
+                .fill(ui.visuals().window_fill())
+                .inner_margin(MARGIN);
+            let mut cancel = false;
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+                ui.set_width(WIDTH);
+                // (The panel itself fills the window, so the content is
+                // measured in a scope of its own.)
+                let content = ui.scope(|ui| cancel = self.content(ui, d, commands));
+                // The window is exactly as tall as what it shows.
+                let height = (content.response.rect.height() + 2.0 * MARGIN).ceil();
+                if height != self.size.y {
+                    self.size.y = height;
+                    ui.ctx().request_repaint();
                 }
             });
-        open && !cancel
+            // Closing the window leaves the download running.
+            let closed = ui.input(|i| i.viewport().close_requested());
+            !cancel && !closed
+        })
+    }
+
+    /// Everything inside the window. Returns whether "Cancel" was clicked.
+    fn content(&mut self, ui: &mut Ui, d: &Download, commands: &mut Vec<Command>) -> bool {
+        header(ui, d);
+        ui.add_space(10.0);
+        amount(ui, d);
+        ui.add_space(4.0);
+        segment_map(ui, d, state_color(d));
+        ui.add_space(6.0);
+        status_line(ui, d);
+        ui.add_space(10.0);
+        tiles(ui, d);
+        ui.add_space(8.0);
+        speed_graph(ui, &self.speeds, state_color(d));
+
+        // Whether the details are open is remembered for all progress
+        // windows until RDM is closed.
+        let details_id = Id::unique("progress-details");
+        let mut details = ui.data(|data| data.get_temp(details_id).unwrap_or(false));
+        let mut cancel = false;
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            let toggle = if details {
+                "Hide details"
+            } else {
+                "Show details"
+            };
+            if ui.button(toggle).clicked() {
+                details = !details;
+                ui.data_mut(|data| data.insert_temp(details_id, details));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                cancel = buttons(ui, d, commands);
+            });
+        });
+        if details {
+            ui.separator();
+            self::details(ui, d);
+        }
+        cancel
     }
 
     /// Adds the current transfer rate to the graph.

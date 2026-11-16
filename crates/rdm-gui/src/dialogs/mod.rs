@@ -69,6 +69,11 @@ impl Dialogs {
         }
     }
 
+    /// A download's progress is on screen in a window of its own.
+    pub fn has_progress(&self) -> bool {
+        !self.progress.is_empty()
+    }
+
     pub fn close_progress(&mut self, id: DownloadId) {
         self.progress.retain(|p| p.id != id);
     }

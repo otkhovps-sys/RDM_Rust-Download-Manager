@@ -507,6 +507,12 @@ impl eframe::App for RdmApp {
         if self.downloads.iter().any(|d| d.status.is_active()) {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
+        // Progress windows stay up while the main window is in the tray;
+        // they are drawn together with it, so ask for that frame.
+        if self.dialogs.has_progress() && !ctx.input(|i| i.viewport().visible().unwrap_or(true)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+            ctx.request_repaint_after(LIST_REFRESH);
+        }
         // "Exit" must work even if the hidden window ignores the close request.
         if self
             .quit_requested
