@@ -1,6 +1,6 @@
 //! Small custom widgets: toolbar buttons and the segment map.
 
-use egui::{Align2, Color32, FontId, Rect, Response, Sense, Ui, vec2};
+use egui::{Color32, FontId, Rect, Response, Sense, Ui, vec2};
 use rdm_core::{Download, Status};
 
 use crate::icons::{self, Icon};
@@ -12,7 +12,17 @@ pub fn tool_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Respo
     } else {
         Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(vec2(72.0, 58.0), sense);
+    let text_color = if enabled {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    // Wide enough for the label in whatever font the system provides.
+    let text =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), FontId::proportional(12.0), text_color);
+    let width = (text.size().x + 14.0).max(72.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 58.0), sense);
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -27,18 +37,8 @@ pub fn tool_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Respo
     }
     let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 20.0), vec2(30.0, 30.0));
     icons::paint(ui.painter(), icon_rect, icon, enabled, visuals.dark_mode);
-    let text_color = if enabled {
-        visuals.text_color()
-    } else {
-        visuals.weak_text_color()
-    };
-    ui.painter().text(
-        rect.center_bottom() - vec2(0.0, 5.0),
-        Align2::CENTER_BOTTOM,
-        label,
-        FontId::proportional(12.0),
-        text_color,
-    );
+    let text_pos = rect.center_bottom() - vec2(text.size().x / 2.0, 5.0 + text.size().y);
+    ui.painter().galley(text_pos, text, text_color);
     response
 }
 
