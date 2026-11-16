@@ -1,7 +1,7 @@
 //! Small custom widgets: toolbar buttons and the segment map.
 
 use egui::{Color32, FontId, Rect, Response, Sense, Ui, vec2};
-use rdm_core::{Download, Status};
+use rdm_core::Download;
 
 use crate::icons::{self, Icon};
 
@@ -61,47 +61,43 @@ pub fn busy_indicator(ui: &mut Ui) {
         .request_repaint_after(std::time::Duration::from_millis(100));
 }
 
-/// Horizontal bar showing which parts of the file are already downloaded,
-/// one block per connection - like IDM's progress details.
-pub fn segment_map(ui: &mut Ui, d: &Download) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), Sense::hover());
+/// The progress bar. For a file fetched over several connections every
+/// connection's part fills in on its own, like IDM's progress details.
+pub fn segment_map(ui: &mut Ui, d: &Download, color: Color32) {
+    const RADIUS: u8 = 6;
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 12.0), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
-    let done_color = Color32::from_rgb(30, 136, 229);
-    let active_color = Color32::from_rgb(67, 160, 71);
+    painter.rect_filled(rect, RADIUS, ui.visuals().extreme_bg_color);
 
+    // Only the ends of the bar are round, so parts in the middle join up.
+    let fill = |x0: f32, x1: f32| {
+        let round = |at_end: bool| if at_end { RADIUS } else { 0 };
+        let (left, right) = (
+            round(x0 <= rect.left() + 0.5),
+            round(x1 >= rect.right() - 0.5),
+        );
+        let corners = egui::CornerRadius {
+            nw: left,
+            sw: left,
+            ne: right,
+            se: right,
+        };
+        let part = Rect::from_x_y_ranges(x0..=x1.max(x0 + 0.5), rect.y_range());
+        painter.rect_filled(part, corners, color);
+    };
     let x_at =
         |offset: u64, size: u64| rect.left() + rect.width() * (offset as f64 / size as f64) as f32;
     match d.size.filter(|&s| s > 0 && !d.segments.is_empty()) {
         Some(size) => {
             for s in &d.segments {
-                let (x0, x1) = (x_at(s.start, size), x_at(s.pos().min(s.end), size));
-                let color = if s.active && d.status == Status::Downloading {
-                    active_color
-                } else {
-                    done_color
-                };
-                painter.rect_filled(
-                    Rect::from_x_y_ranges(x0..=x1.max(x0 + 0.5), rect.y_range()),
-                    0.0,
-                    color,
-                );
+                fill(x_at(s.start, size), x_at(s.pos().min(s.end), size));
             }
         }
         None => {
             let fraction = d.progress().unwrap_or(0.0);
-            let x1 = rect.left() + rect.width() * fraction;
-            painter.rect_filled(
-                Rect::from_x_y_ranges(rect.left()..=x1, rect.y_range()),
-                2.0,
-                done_color,
-            );
+            if fraction > 0.0 {
+                fill(rect.left(), rect.left() + rect.width() * fraction);
+            }
         }
     }
-    painter.rect_stroke(
-        rect,
-        2.0,
-        ui.visuals().widgets.noninteractive.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
 }

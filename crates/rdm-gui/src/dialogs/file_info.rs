@@ -9,7 +9,8 @@ use rdm_core::{
     Tool, TorrentMeta,
 };
 
-use super::{button_row, window};
+use super::{button_row, primary_button, window};
+use crate::app::Command;
 
 pub struct AddUrl {
     url: String,
@@ -101,6 +102,8 @@ struct Failure {
 enum FormAction {
     Keep,
     Close,
+    /// The download was added; `true` if it starts right away.
+    Added(rdm_core::DownloadId, bool),
     /// Ask the server again.
     Retry,
     Install(Tool),
@@ -140,8 +143,9 @@ impl FileInfo {
         }
     }
 
-    /// Returns `false` once the dialog is closed.
-    pub fn show(&mut self, ctx: &Context, engine: &Engine) -> bool {
+    /// Returns `false` once the dialog is closed. A download that was
+    /// started gets its progress window through `commands`.
+    pub fn show(&mut self, ctx: &Context, engine: &Engine, commands: &mut Vec<Command>) -> bool {
         if let State::Probing(handle) = &mut self.state
             && let Some(result) = handle.try_take()
         {
@@ -228,7 +232,7 @@ impl FileInfo {
                 }
                 State::Ready(form) => {
                     action = form.show(ui, engine);
-                    open &= !matches!(action, FormAction::Close);
+                    open &= !matches!(action, FormAction::Close | FormAction::Added(..));
                 }
             }
         });
@@ -239,6 +243,7 @@ impl FileInfo {
             FormAction::Retry => {
                 self.state = State::Probing(engine.probe(&self.url, self.request.clone()));
             }
+            FormAction::Added(id, true) => commands.push(Command::ShowProgress(id)),
             _ => {}
         }
         open
@@ -393,10 +398,7 @@ impl Form {
             if ui.button("Download Later").clicked() {
                 add = Some(false);
             }
-            if ui
-                .button(RichText::new("Start Download").strong())
-                .clicked()
-            {
+            if ui.add(primary_button("Start Download")).clicked() {
                 add = Some(true);
             }
         });
@@ -412,8 +414,8 @@ impl Form {
             let mut new = self.new.clone();
             new.save_dir = PathBuf::from(self.dir_text.trim());
             new.start = start;
-            engine.add(new);
-            action = FormAction::Close;
+            let id = engine.add(new);
+            action = FormAction::Added(id, start);
         }
         action
     }

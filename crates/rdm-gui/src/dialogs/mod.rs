@@ -107,7 +107,8 @@ impl Dialogs {
             }
         }
 
-        self.file_info.retain_mut(|dialog| dialog.show(ctx, engine));
+        self.file_info
+            .retain_mut(|dialog| dialog.show(ctx, engine, &mut commands));
 
         self.progress.retain_mut(
             |dialog| match downloads.iter().find(|d| d.id == dialog.id) {
@@ -154,6 +155,14 @@ fn window<'a>(ctx: &Context, title: String, id: Id, offset: u64) -> egui::Window
         .resizable(false)
         .pivot(Align2::CENTER_CENTER)
         .default_pos(ctx.content_rect().center() + egui::vec2(shift, shift))
+}
+
+/// The button for a dialog's main action, filled so it stands out.
+fn primary_button<'a>(label: &str) -> egui::Button<'a> {
+    let text = egui::RichText::new(label)
+        .strong()
+        .color(egui::Color32::WHITE);
+    egui::Button::new(text).fill(egui::Color32::from_rgb(30, 136, 229))
 }
 
 /// Right aligned row of dialog buttons.

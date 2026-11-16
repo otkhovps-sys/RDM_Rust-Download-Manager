@@ -164,7 +164,12 @@ impl RdmApp {
                 engine.remove(&done, false);
             }
             Command::Redownload(id) => engine.redownload(id),
-            Command::ShowProgress(id) => self.dialogs.show_progress(id),
+            Command::ShowProgress(id) => {
+                // A download added a moment ago must be in the list before
+                // its window is drawn.
+                self.list_taken = None;
+                self.dialogs.show_progress(id);
+            }
             Command::OpenFile(id) => {
                 if let Some(d) = engine.get(id) {
                     let _ = open::that_detached(d.path());
