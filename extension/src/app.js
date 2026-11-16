@@ -1,24 +1,28 @@
-// Connection to the RDM app (http://127.0.0.1:<port>, local machine only).
+// Connection to the RDM app on this computer (http://127.0.0.1, local only).
+//
+// RDM listens on the first free port of a small fixed range; the extension
+// finds it by asking each of them, so there is nothing to configure.
 
-const DEFAULTS = { port: 9614, capture: true };
-const PING_CACHE_MS = 60_000;
+const PORTS = [9614, 9615, 9616, 9617, 9618, 9619, 9620, 9621, 9622, 9623];
+const DEFAULTS = { capture: true };
+const CACHE_MS = 60_000;
+const VERSION = chrome.runtime.getManifest().version;
 
-let pingCache = { at: 0, value: null };
+/** Where RDM was last found: `{at, port, info}`. */
+let found = { at: 0, port: null, info: null };
 
-/** @returns {Promise<{port: number, capture: boolean}>} */
+/** @returns {Promise<{capture: boolean}>} */
 export async function getSettings() {
   return { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
 }
 
 export async function setSettings(values) {
   await chrome.storage.local.set(values);
-  pingCache = { at: 0, value: null };
 }
 
-async function call(path, body) {
-  const { port } = await getSettings();
+async function request(port, path, body, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1500);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: body ? "POST" : "GET",
@@ -28,10 +32,17 @@ async function call(path, body) {
     });
     return await response.json();
   } catch {
-    return null; // RDM is not running
+    return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Says hello on one port; resolves to RDM's info or rejects. */
+async function hello(port) {
+  const info = await request(port, `/ping?ext=${VERSION}`, null, 800);
+  if (info?.app !== "rdm") throw new Error("not RDM");
+  return { port, info };
 }
 
 /**
@@ -39,10 +50,20 @@ async function call(path, body) {
  * running. Cached for a minute so every download does not wait for it.
  */
 export async function ping(force = false) {
-  if (!force && pingCache.value && Date.now() - pingCache.at < PING_CACHE_MS) return pingCache.value;
-  const value = await call("/ping");
-  pingCache = { at: Date.now(), value };
-  return value;
+  if (!force && found.info && Date.now() - found.at < CACHE_MS) return found.info;
+  // The port used last time first, then the whole range at once.
+  const candidates = found.port ? [[found.port], PORTS] : [PORTS];
+  for (const ports of candidates) {
+    try {
+      const { port, info } = await Promise.any(ports.map(hello));
+      found = { at: Date.now(), port, info };
+      return info;
+    } catch {
+      // not on these ports
+    }
+  }
+  found = { at: Date.now(), port: null, info: null };
+  return null;
 }
 
 /** RDM is running and both sides want downloads handed over. */
@@ -68,14 +89,24 @@ async function cookiesFor(url) {
  * @returns {Promise<boolean>} whether RDM accepted it
  */
 export async function sendToApp({ url, referer, fileName, page = false }) {
-  const reply = await call("/download", {
+  if (!found.port && !(await ping(true))) return false;
+  const body = {
     url,
     page,
     referer: referer || undefined,
     fileName: fileName || undefined,
-    // Page downloads are fetched by yt-dlp, which does not use these.
+    // Video pages are fetched by yt-dlp, which handles these itself.
     cookies: page ? undefined : (await cookiesFor(url)) || undefined,
     userAgent: navigator.userAgent,
-  });
+  };
+  let reply = await request(found.port, "/download", body, 1500);
+  if (!reply && (await ping(true))) {
+    reply = await request(found.port, "/download", body, 1500); // RDM was restarted on another port
+  }
   return Boolean(reply && reply.ok);
 }
+
+// Say hello as soon as the browser starts or the extension is added, so RDM
+// can show "connected" right away.
+chrome.runtime.onInstalled.addListener(() => ping(true));
+chrome.runtime.onStartup.addListener(() => ping(true));

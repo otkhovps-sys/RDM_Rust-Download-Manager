@@ -28,7 +28,7 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
         return ctx.torrents.probe(ctx, url, req).await;
     }
     if req.page {
-        return ytdlp::probe(ctx, url).await;
+        return ytdlp::probe(ctx, url, req).await;
     }
     let response = ctx.get(url, req).header("Range", "bytes=0-").send().await?;
     let status = response.status();
@@ -58,11 +58,21 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
         .as_deref()
         .is_some_and(|t| t.starts_with("text/html"))
     {
-        match ytdlp::probe(ctx, url).await {
+        match ytdlp::probe(ctx, url, req).await {
             Ok(page) => return Ok(page),
             Err(e @ crate::Error::MissingTool(_)) if ytdlp::is_video_site(url) => return Err(e),
             Err(_) => {}
         }
+    }
+
+    // DASH streams (separate audio/video pieces) are fetched by yt-dlp.
+    let is_dash = content_type
+        .as_deref()
+        .is_some_and(|t| t.to_ascii_lowercase().contains("dash+xml"))
+        || url::Url::parse(url).is_ok_and(|u| u.path().to_ascii_lowercase().ends_with(".mpd"));
+    if is_dash {
+        drop(response);
+        return ytdlp::probe(ctx, url, req).await;
     }
 
     let is_hls = content_type
@@ -118,7 +128,12 @@ async fn probe_hls(
     req: &RequestInfo,
     content_type: Option<String>,
 ) -> Result<ProbeResult> {
-    let playlist = hls::load(ctx, url, req).await?;
+    let playlist = match hls::load(ctx, url, req).await {
+        Ok(playlist) => playlist,
+        // What RDM's own HLS downloader cannot do, yt-dlp often can.
+        Err(crate::Error::Unsupported(_)) => return ytdlp::probe(ctx, url, req).await,
+        Err(e) => return Err(e),
+    };
     let stem = file_name_from_url(url)
         .map(|n| {
             n.rsplit_once('.')

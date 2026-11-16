@@ -123,11 +123,17 @@ jobs:
         shell: pwsh
         run: |
           $dir = "$env:RUNNER_TEMP\rdm-installed"
+          $env:RDM_DATA_DIR = "$env:RUNNER_TEMP\rdm-data-2"
           $setup = (Get-Item dist\*-setup.exe).FullName
           Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`"" -Wait
           if (!(Test-Path "$dir\rdm.exe")) { throw "rdm.exe was not installed" }
           if (!(Test-Path "$dir\extension\manifest.json")) { throw "the extension was not installed" }
-          $env:RDM_DATA_DIR = "$env:RUNNER_TEMP\rdm-data-2"
+          # The installer fetched the helper programs (real downloads, checksums verified).
+          $tools = "$env:RDM_DATA_DIR\tools"
+          & "$tools\yt-dlp.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "yt-dlp was not installed" }
+          & "$tools\ffmpeg.exe" -version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg was not installed" }
           $p = Start-Process -FilePath "$dir\rdm.exe" -ArgumentList "--minimized" -PassThru
           Start-Sleep -Seconds 15
           if ($p.HasExited) { throw "the installed RDM exited early" }

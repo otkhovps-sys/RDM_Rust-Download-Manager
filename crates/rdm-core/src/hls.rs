@@ -203,6 +203,20 @@ async fn fetch_segment(
 
 /// Returns the highest bandwidth variant of a master playlist.
 fn best_variant(text: &str, base: &Url) -> Result<Option<Url>> {
+    // Sound delivered as its own playlist would be missing from the file.
+    let separate_audio = text.lines().any(|line| {
+        line.trim()
+            .strip_prefix("#EXT-X-MEDIA:")
+            .is_some_and(|attrs| {
+                attribute(attrs, "TYPE").as_deref() == Some("AUDIO")
+                    && attribute(attrs, "URI").is_some()
+            })
+    });
+    if separate_audio {
+        return Err(Error::Unsupported(
+            "this HLS stream has separate audio and video tracks".into(),
+        ));
+    }
     let mut best: Option<(u64, &str)> = None;
     let mut lines = text.lines().map(str::trim);
     while let Some(line) = lines.next() {
@@ -242,15 +256,17 @@ fn parse_media(text: &str, base: &Url) -> Result<Playlist> {
             key = parse_key(attrs, base)?;
         } else if let Some(attrs) = line.strip_prefix("#EXT-X-MAP:") {
             if attribute(attrs, "BYTERANGE").is_some() {
-                return Err(Error::other(
-                    "HLS byte-range init sections are not supported",
+                return Err(Error::Unsupported(
+                    "HLS byte-range init sections are not supported".into(),
                 ));
             }
             let uri =
                 attribute(attrs, "URI").ok_or_else(|| Error::other("EXT-X-MAP without URI"))?;
             playlist.init = Some(base.join(&uri)?.to_string());
         } else if line.starts_with("#EXT-X-BYTERANGE") {
-            return Err(Error::other("HLS byte-range playlists are not supported"));
+            return Err(Error::Unsupported(
+                "HLS byte-range playlists are not supported".into(),
+            ));
         } else if !line.starts_with('#') {
             playlist.segments.push(MediaSegment {
                 url: base.join(line)?.to_string(),
@@ -275,7 +291,7 @@ fn parse_key(attrs: &str, base: &Url) -> Result<Option<Key>> {
                 iv,
             }))
         }
-        Some(other) => Err(Error::other(format!(
+        Some(other) => Err(Error::Unsupported(format!(
             "HLS encryption {other} is not supported (DRM)"
         ))),
     }

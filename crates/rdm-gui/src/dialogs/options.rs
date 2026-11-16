@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use egui::{Context, Id, RichText, Ui};
+use egui::{Context, Id, Ui};
 use rdm_core::{Category, Engine, Settings};
 
 use super::{button_row, window};
@@ -139,11 +139,6 @@ impl OptionsDialog {
             &mut s.browser_integration,
             "Take over downloads from the browser extension",
         );
-        ui.horizontal(|ui| {
-            ui.label("Local port:");
-            ui.add(egui::DragValue::new(&mut s.server_port).range(1024..=65535));
-            ui.weak("(restart RDM after changing)");
-        });
         ui.add_space(6.0);
         ui.label("Automatically download these file types:");
         ui.add(
@@ -152,11 +147,9 @@ impl OptionsDialog {
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(6.0);
-        ui.label(RichText::new("Installing the extension").strong());
         ui.weak(
-            "Chrome / Edge / Brave: open chrome://extensions, enable Developer mode, \
-             click \"Load unpacked\" and choose the `extension` folder of RDM.\n\
-             Firefox: open about:debugging, \"Load Temporary Add-on\" and pick extension/manifest.json.",
+            "RDM and the extension find each other automatically. To add the extension to a \
+             browser, use Tasks > Connect browser.",
         );
     }
 

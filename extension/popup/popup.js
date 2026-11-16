@@ -17,7 +17,7 @@ function formatSize(bytes) {
 function describe(item) {
   if (item.kind === "page") return { name: `${item.site} video (choose quality in RDM)`, info: "" };
   const name = decodeURIComponent(new URL(item.url).pathname.split("/").pop() || item.url);
-  return { name, info: item.kind === "hls" ? "HLS" : formatSize(item.size) };
+  return { name, info: { hls: "HLS", dash: "DASH" }[item.kind] || formatSize(item.size) };
 }
 
 async function download(tab, item) {
@@ -63,7 +63,6 @@ async function refresh() {
   $("status").textContent = app ? "Connected to RDM" : "RDM is not running";
   $("version").textContent = app ? `v${app.version}` : "";
   $("capture").checked = settings.capture;
-  $("port").value = settings.port;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const web = /^https?:/i.test(tab?.url || "");
@@ -77,9 +76,5 @@ async function refresh() {
 }
 
 $("capture").addEventListener("change", (event) => send({ type: "set", values: { capture: event.target.checked } }));
-$("port").addEventListener("change", async (event) => {
-  await send({ type: "set", values: { port: Number(event.target.value) || 9614 } });
-  refresh();
-});
 
 refresh();

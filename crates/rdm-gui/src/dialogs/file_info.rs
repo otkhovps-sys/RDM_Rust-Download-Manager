@@ -207,9 +207,9 @@ impl FileInfo {
                     if installable.is_some() {
                         ui.add_space(4.0);
                         ui.label(
-                            "Video sites such as YouTube need yt-dlp, a free open source \
-                             program. RDM can download the official build from \
-                             github.com/yt-dlp (about 35 MB).",
+                            "Video sites such as YouTube and split streams (DASH, HLS with \
+                             separate sound) need yt-dlp, a free open source program. RDM can \
+                             download the official build from github.com/yt-dlp (about 35 MB).",
                         );
                     }
                     button_row(ui, |ui| {
@@ -260,6 +260,13 @@ impl FileInfo {
                     .rsplit_once('.')
                     .map_or("ts", |(_, ext)| ext);
                 new.file_name = format!("{stem}.{ext}");
+            } else if probe.kind == Kind::Page && !self.request.page {
+                // A stream handed to yt-dlp: the page title beats "master".
+                let ext = probe
+                    .file_name
+                    .rsplit_once('.')
+                    .map_or("mp4", |(_, ext)| ext);
+                new.file_name = format!("{}.{ext}", rdm_core::util::sanitize_file_name(name));
             } else if probe.kind == Kind::Http && name.contains('.') {
                 new.file_name = name.to_owned();
                 new.category = Category::from_file_name(name);

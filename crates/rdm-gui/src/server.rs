@@ -1,4 +1,5 @@
-//! Local HTTP endpoint for the browser extension (127.0.0.1 only).
+//! Local HTTP endpoint for the browser extension (127.0.0.1 only), on the
+//! first free port of [`PORTS`].
 //!
 //! * `GET  /ping`     -> app info and the file types to capture
 //! * `POST /download` -> `{url, referer?, cookies?, userAgent?, fileName?, page?}`
@@ -8,7 +9,8 @@
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use rdm_core::{Engine, RequestInfo};
 use serde::Deserialize;
@@ -40,21 +42,59 @@ struct DownloadBody {
     page: bool,
 }
 
-/// Starts the server thread. Fails when the port is already taken.
-pub fn spawn(port: u16, engine: Engine, ctx: egui::Context) -> std::io::Result<Receiver<Message>> {
-    let server = Server::http(("127.0.0.1", port)).map_err(std::io::Error::other)?;
-    let (tx, rx) = channel();
+/// RDM listens on the first free port of this range and the extension looks
+/// for it there, so nobody has to configure a port.
+pub const PORTS: std::ops::RangeInclusive<u16> = 9614..=9623;
+
+/// When the browser extension last talked to RDM, and its version.
+type LastSeen = Arc<Mutex<Option<(Instant, String)>>>;
+
+/// The running endpoint, as seen by the GUI.
+pub struct Link {
+    pub port: u16,
+    pub messages: Receiver<Message>,
+    seen: LastSeen,
+}
+
+impl Link {
+    /// Version of the connected extension and how long ago it was heard from.
+    pub fn extension(&self) -> Option<(String, Duration)> {
+        let seen = self.seen.lock().unwrap();
+        seen.as_ref()
+            .map(|(at, version)| (version.clone(), at.elapsed()))
+    }
+}
+
+/// Starts the server thread on the first free port of [`PORTS`].
+pub fn spawn(engine: Engine, ctx: egui::Context) -> std::io::Result<Link> {
+    let (port, server) = PORTS
+        .filter_map(|port| Some((port, Server::http(("127.0.0.1", port)).ok()?)))
+        .next()
+        .ok_or_else(|| std::io::Error::other("no free local port"))?;
+    let (tx, messages) = channel();
+    let seen = LastSeen::default();
+    let thread_seen = seen.clone();
     std::thread::Builder::new()
         .name("rdm-server".into())
         .spawn(move || {
             for request in server.incoming_requests() {
-                handle(request, &engine, &tx, &ctx);
+                handle(request, &engine, &tx, &ctx, &thread_seen);
             }
         })?;
-    Ok(rx)
+    Ok(Link {
+        port,
+        messages,
+        seen,
+    })
 }
 
-fn handle(mut request: Request, engine: &Engine, tx: &Sender<Message>, ctx: &egui::Context) {
+fn handle(
+    mut request: Request,
+    engine: &Engine,
+    tx: &Sender<Message>,
+    ctx: &egui::Context,
+    seen: &LastSeen,
+) {
     if !origin_allowed(&request) {
         let _ = request.respond(reply(
             403,
@@ -66,7 +106,16 @@ fn handle(mut request: Request, engine: &Engine, tx: &Sender<Message>, ctx: &egu
         let _ = tx.send(message);
         ctx.request_repaint();
     };
-    let response = match (request.method(), request.url()) {
+    // `/ping?ext=1.3.0`: the extension says hello with its version.
+    let url = request.url().to_owned();
+    let (path, query) = url.split_once('?').unwrap_or((&url, ""));
+    // (Browsers send no `Origin` with an extension's GET requests, so this
+    // cannot be tied to one; a false "connected" would be harmless anyway.)
+    if let Some(version) = query.strip_prefix("ext=") {
+        *seen.lock().unwrap() = Some((Instant::now(), version.to_owned()));
+        ctx.request_repaint();
+    }
+    let response = match (request.method(), path) {
         (Method::Options, _) => reply(204, json!({})),
         (Method::Get, "/ping") => {
             let settings = engine.settings();
@@ -106,12 +155,13 @@ fn handle(mut request: Request, engine: &Engine, tx: &Sender<Message>, ctx: &egu
     let _ = request.respond(response);
 }
 
-/// Web pages must not be able to push downloads; only extensions (or local
-/// programs, which send no `Origin`) may talk to us.
-fn origin_allowed(request: &Request) -> bool {
-    let origin = request.headers().iter().find(|h| h.field.equiv("Origin"));
-    origin.is_none_or(|h| {
-        let value = h.value.as_str();
+fn origin(request: &Request) -> Option<&str> {
+    let header = request.headers().iter().find(|h| h.field.equiv("Origin"))?;
+    Some(header.value.as_str())
+}
+
+fn from_extension(request: &Request) -> bool {
+    origin(request).is_some_and(|value| {
         [
             "chrome-extension://",
             "moz-extension://",
@@ -120,6 +170,12 @@ fn origin_allowed(request: &Request) -> bool {
         .iter()
         .any(|prefix| value.starts_with(prefix))
     })
+}
+
+/// Web pages must not be able to push downloads; only extensions (or local
+/// programs, which send no `Origin`) may talk to us.
+fn origin_allowed(request: &Request) -> bool {
+    origin(request).is_none() || from_extension(request)
 }
 
 fn read_body(request: &mut Request) -> Option<DownloadBody> {
@@ -146,12 +202,7 @@ fn reply(status: u16, body: serde_json::Value) -> Response<std::io::Cursor<Vec<u
 
 /// If RDM already runs, passes it the URL (or asks it to show itself) and
 /// returns `true` so this second process can exit.
-pub fn forward_to_running(port: u16, url: Option<&str>) -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+pub fn forward_to_running(url: Option<&str>) -> bool {
     let (path, body) = match url {
         Some(url) => ("/download", json!({ "url": url }).to_string()),
         None => ("/show", String::new()),
@@ -161,10 +212,17 @@ pub fn forward_to_running(port: u16, url: Option<&str>) -> bool {
          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
-    response.contains(r#""ok":true"#)
+    PORTS.into_iter().any(|port| {
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else {
+            return false;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        if stream.write_all(request.as_bytes()).is_err() {
+            return false;
+        }
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        response.contains(r#""ok":true"#)
+    })
 }

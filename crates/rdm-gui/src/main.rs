@@ -21,8 +21,11 @@ fn main() {
     let url_arg = std::env::args()
         .skip(1)
         .find_map(|arg| source_argument(&arg));
-    let port = rdm_core::Settings::load().server_port;
-    if server::forward_to_running(port, url_arg.as_deref()) {
+    // `--install-tools` (run by the installer): fetch yt-dlp and ffmpeg.
+    if std::env::args().any(|arg| arg == "--install-tools") {
+        std::process::exit(install_tools());
+    }
+    if server::forward_to_running(url_arg.as_deref()) {
         return;
     }
 
@@ -58,6 +61,33 @@ fn main() {
         "Could not open the window. Please update your graphics driver.\n\n{}",
         errors.join("\n")
     ));
+}
+
+/// Installs the helper programs that are not on this computer yet, without
+/// opening a window. Returns the process exit code.
+fn install_tools() -> i32 {
+    use rdm_core::Tool;
+    let Ok(engine) = Engine::new() else {
+        return 1;
+    };
+    let mut code = 0;
+    for tool in [Tool::YtDlp, Tool::Ffmpeg] {
+        if engine.tool_path(tool).is_some() || !tool.can_install() {
+            continue;
+        }
+        let install = engine.install_tool(tool);
+        let result = loop {
+            match install.result() {
+                Some(result) => break result,
+                None => std::thread::sleep(std::time::Duration::from_millis(200)),
+            }
+        };
+        if let Err(e) = result {
+            eprintln!("rdm: could not install {}: {e}", tool.name());
+            code = 1;
+        }
+    }
+    code
 }
 
 /// Windows: DirectX/Vulkan first, OpenGL as fallback. Elsewhere: OpenGL.

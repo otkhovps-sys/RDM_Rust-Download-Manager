@@ -1,6 +1,5 @@
 //! Main window: menu, toolbar, category tree, download list and status bar.
 
-use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 /// egui redraws on every mouse move; more than this is wasted CPU for a
@@ -15,7 +14,7 @@ use rdm_core::{Category, Download, DownloadId, Engine, Event, Status};
 
 use crate::dialogs::Dialogs;
 use crate::icons::{self, Icon};
-use crate::server::{self, Message};
+use crate::server::{self, Link, Message};
 use crate::table::DownloadTable;
 use crate::tray::{Tray, TrayAction};
 use crate::widgets::tool_button;
@@ -35,6 +34,7 @@ pub enum Command {
     OpenFolder(DownloadId),
     CopyUrl(DownloadId),
     Options,
+    BrowserSetup,
     About,
     Credits,
     Quit,
@@ -68,8 +68,8 @@ impl Filter {
 
 pub struct RdmApp {
     engine: Engine,
-    messages: Option<Receiver<Message>>,
-    server_error: Option<String>,
+    /// Endpoint for the browser extension; `None` if no local port was free.
+    link: Option<Link>,
     downloads: Vec<Download>,
     filter: Filter,
     table: DownloadTable,
@@ -95,21 +95,19 @@ impl RdmApp {
         let ctx = cc.egui_ctx.clone();
         engine.set_waker(move || ctx.request_repaint());
 
-        let port = engine.settings().server_port;
-        let (messages, server_error) =
-            match server::spawn(port, engine.clone(), cc.egui_ctx.clone()) {
-                Ok(rx) => (Some(rx), None),
-                Err(e) => (
-                    None,
-                    Some(format!(
-                        "Browser integration off: port {port} unavailable ({e})"
-                    )),
-                ),
-            };
+        let link = server::spawn(engine.clone(), cc.egui_ctx.clone()).ok();
 
         let mut dialogs = Dialogs::default();
         if let Some(url) = url {
             dialogs.open_file_info(&engine, url, Default::default(), None);
+        }
+        // First start: show how to add the browser extension, once.
+        if !start_hidden && !engine.settings().browser_setup_done {
+            dialogs.open_browser_setup();
+            engine.set_settings(rdm_core::Settings {
+                browser_setup_done: true,
+                ..engine.settings()
+            });
         }
         let tray = Tray::new(&cc.egui_ctx);
         // Starting hidden only makes sense when the tray can bring RDM back.
@@ -118,8 +116,7 @@ impl RdmApp {
         }
         Self {
             engine,
-            messages,
-            server_error,
+            link,
             downloads: Vec::new(),
             last_frame: Instant::now(),
             list_taken: None,
@@ -183,6 +180,7 @@ impl RdmApp {
             Command::Options => self.dialogs.open_options(engine.settings()),
             Command::About => self.dialogs.about = true,
             Command::Credits => self.dialogs.credits = true,
+            Command::BrowserSetup => self.dialogs.open_browser_setup(),
             Command::Quit => {
                 self.quit_requested = Some(Instant::now());
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -207,7 +205,7 @@ impl RdmApp {
                 TrayAction::Quit => self.execute(ctx, Command::Quit),
             }
         }
-        while let Some(message) = self.messages.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        while let Some(message) = self.link.as_ref().and_then(|l| l.messages.try_recv().ok()) {
             if let Message::Download(incoming) = message {
                 self.dialogs.open_file_info(
                     &self.engine,
@@ -295,6 +293,9 @@ impl RdmApp {
                 }
                 if ui.button("Open torrent file...").clicked() {
                     commands.push(Command::OpenTorrent);
+                }
+                if ui.button("Connect browser...").clicked() {
+                    commands.push(Command::BrowserSetup);
                 }
                 ui.separator();
                 if ui.button("Exit").clicked() {
@@ -442,7 +443,7 @@ impl RdmApp {
         });
     }
 
-    fn status_bar(&self, ui: &mut Ui) {
+    fn status_bar(&self, ui: &mut Ui, commands: &mut Vec<Command>) {
         let running: Vec<_> = self
             .downloads
             .iter()
@@ -461,13 +462,24 @@ impl RdmApp {
             ui.separator();
             ui.label(format!("Total speed: {}", format_speed(speed)));
             ui.separator();
-            match &self.server_error {
-                Some(error) => ui.colored_label(Color32::from_rgb(229, 57, 53), error),
-                None => ui.weak(format!(
-                    "Browser integration: 127.0.0.1:{}",
-                    self.engine.settings().server_port
-                )),
+            // Click to open the "Connect your browser" guide.
+            let (color, text) = match self.link.as_ref().map(Link::extension) {
+                Some(Some(_)) => (Color32::from_rgb(67, 160, 71), "Browser: connected"),
+                Some(None) => (ui.visuals().weak_text_color(), "Browser: not connected"),
+                None => (Color32::from_rgb(229, 57, 53), "Browser link unavailable"),
             };
+            let hint = match &self.link {
+                Some(link) => format!(
+                    "Listening on 127.0.0.1:{} - click for the browser guide",
+                    link.port
+                ),
+                None => "No free local port; restart RDM".to_owned(),
+            };
+            let label =
+                egui::Label::new(RichText::new(text).color(color)).sense(egui::Sense::click());
+            if ui.add(label).on_hover_text(hint).clicked() {
+                commands.push(Command::BrowserSetup);
+            }
         });
     }
 }
@@ -509,7 +521,7 @@ impl eframe::App for RdmApp {
         let mut commands = self.shortcuts(&ctx);
         egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui, &mut commands));
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui, &mut commands));
-        egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui, &mut commands));
         egui::Panel::left("categories")
             .resizable(true)
             .default_size(180.0)
@@ -524,7 +536,11 @@ impl eframe::App for RdmApp {
                 .collect();
             commands.extend(self.table.show(ui, &visible));
         });
-        commands.extend(self.dialogs.show(&ctx, &self.engine, &self.downloads));
+        let extension = self.link.as_ref().and_then(Link::extension);
+        commands.extend(
+            self.dialogs
+                .show(&ctx, &self.engine, &self.downloads, extension),
+        );
 
         if !commands.is_empty() {
             self.list_taken = None; // show the effect right away

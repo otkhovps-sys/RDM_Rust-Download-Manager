@@ -13,7 +13,7 @@ use crate::download::SharedDownload;
 use crate::http::{Ctx, cancelled};
 use crate::tools::{Tool, hidden, stop};
 use crate::util::sanitize_file_name;
-use crate::{Download, Error, Kind, PageOption, ProbeResult, Result};
+use crate::{Download, Error, Kind, PageOption, ProbeResult, RequestInfo, Result};
 
 /// One line per progress update: `RDM|downloaded|total|estimate`.
 const PROGRESS: &str = "download:RDM|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s";
@@ -80,9 +80,10 @@ impl Format {
 }
 
 /// Asks yt-dlp what the page offers, without downloading.
-pub(crate) async fn probe(ctx: &Ctx, url: &str) -> Result<ProbeResult> {
+pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<ProbeResult> {
     let ytdlp = ctx.tools.require(Tool::YtDlp)?;
     let output = hidden(Command::new(ytdlp))
+        .args(header_args(req))
         .args([
             "--dump-single-json",
             "--no-playlist",
@@ -185,6 +186,25 @@ fn options(formats: &[Format], ffmpeg: bool) -> Vec<PageOption> {
     options
 }
 
+/// For streams found by the browser extension, yt-dlp sends what the
+/// browser sent. Video sites (`req.page`) are left to yt-dlp's own handling.
+fn header_args(req: &RequestInfo) -> Vec<String> {
+    let mut args = Vec::new();
+    if req.page {
+        return args;
+    }
+    if let Some(referer) = &req.referer {
+        args.extend(["--referer".to_owned(), referer.clone()]);
+    }
+    if let Some(agent) = &req.user_agent {
+        args.extend(["--user-agent".to_owned(), agent.clone()]);
+    }
+    if let Some(cookies) = req.cookies.as_deref().filter(|c| !c.is_empty()) {
+        args.extend(["--add-header".to_owned(), format!("Cookie:{cookies}")]);
+    }
+    args
+}
+
 /// yt-dlp arguments that select `option`.
 fn format_args(option: &PageOption, ffmpeg: bool) -> Vec<String> {
     let limit = option
@@ -222,7 +242,7 @@ pub(crate) async fn run(
 ) -> Result<()> {
     let ytdlp = ctx.tools.require(Tool::YtDlp)?;
     let ffmpeg = ctx.tools.find(Tool::Ffmpeg);
-    let (url, option, dir, stem) = {
+    let (url, option, dir, stem, request) = {
         let d = dl.lock().unwrap();
         let option = d
             .page
@@ -233,12 +253,14 @@ pub(crate) async fn run(
             option,
             d.save_dir.clone(),
             stem(&d.file_name).to_owned(),
+            d.request.clone(),
         )
     };
     tokio::fs::create_dir_all(&dir).await?;
 
     let mut command = hidden(Command::new(ytdlp));
     command
+        .args(header_args(&request))
         .args([
             "--no-playlist",
             "--no-warnings",
@@ -450,6 +472,29 @@ mod tests {
         p.update(&mut d, "1000|1000|NA");
         p.update(&mut d, "100|NA|300.5"); // audio stream starts
         assert_eq!((d.downloaded, d.size), (1100, Some(1300)));
+    }
+
+    #[test]
+    fn forwards_browser_headers_for_streams_only() {
+        let mut req = RequestInfo {
+            referer: Some("https://site.example/watch".into()),
+            cookies: Some("a=1".into()),
+            user_agent: Some("UA".into()),
+            page: false,
+        };
+        assert_eq!(
+            header_args(&req),
+            [
+                "--referer",
+                "https://site.example/watch",
+                "--user-agent",
+                "UA",
+                "--add-header",
+                "Cookie:a=1"
+            ]
+        );
+        req.page = true;
+        assert!(header_args(&req).is_empty());
     }
 
     #[test]

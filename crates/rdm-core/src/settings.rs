@@ -24,8 +24,6 @@ pub struct Settings {
     pub speed_limit_kib: u64,
     /// Times a broken connection is retried before giving up.
     pub max_retries: u32,
-    /// Local port the browser extension talks to.
-    pub server_port: u16,
     /// Let the extension take over browser downloads.
     pub browser_integration: bool,
     /// Space separated extensions the extension should capture.
@@ -38,6 +36,8 @@ pub struct Settings {
     pub dark_mode: bool,
     /// Closing the window keeps RDM running in the system tray.
     pub close_to_tray: bool,
+    /// The "Connect your browser" guide was shown once.
+    pub browser_setup_done: bool,
 }
 
 impl Default for Settings {
@@ -53,7 +53,6 @@ impl Default for Settings {
             max_active: 3,
             speed_limit_kib: 0,
             max_retries: 8,
-            server_port: 9614,
             browser_integration: true,
             capture_types: DEFAULT_CAPTURE_TYPES.to_owned(),
             show_complete_dialog: true,
@@ -63,6 +62,7 @@ impl Default for Settings {
             ),
             dark_mode: false,
             close_to_tray: true,
+            browser_setup_done: false,
         }
     }
 }

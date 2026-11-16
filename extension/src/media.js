@@ -2,7 +2,7 @@
 
 import { isStreamHost, videoSite } from "./sites.js";
 
-const MEDIA_EXT = /\.(m3u8|mp4|m4v|webm|mkv|mov|flv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i;
+const MEDIA_EXT = /\.(m3u8|mpd|mp4|m4v|webm|mkv|mov|flv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i;
 // Pieces of a stream (HLS / DASH fragments) are useless on their own.
 const FRAGMENT = /\.(ts|m4s|m4f|cmfv|cmfa)$|\/(seg|segment|chunk|frag)[-_]?\d+/i;
 const MIN_SIZE = 512 * 1024;
@@ -10,7 +10,7 @@ const MAX_ITEMS = 30;
 
 const key = (tabId) => `media:${tabId}`;
 
-/** Files and streams seen in a tab: `[{url, kind: "file"|"hls", size, type}]`. */
+/** Files and streams seen in a tab: `[{url, kind: "file"|"hls"|"dash", size, type}]`. */
 async function seen(tabId) {
   const data = await chrome.storage.session.get(key(tabId));
   return data[key(tabId)] || [];
@@ -66,6 +66,7 @@ function classify(url, contentType) {
   const path = new URL(url).pathname;
   const type = contentType.split(";")[0].trim().toLowerCase();
   if (type.includes("mpegurl") || /\.m3u8$/i.test(path)) return "hls";
+  if (type.includes("dash+xml") || /\.mpd$/i.test(path)) return "dash";
   if (FRAGMENT.test(path) || type === "video/mp2t" || type.includes("iso.segment")) return null;
   if (type.startsWith("video/") || type.startsWith("audio/")) return "file";
   if (MEDIA_EXT.test(path) && (type === "" || type === "application/octet-stream")) return "file";

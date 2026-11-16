@@ -16,6 +16,9 @@ pub enum Error {
     Incomplete,
     #[error("{} is not installed", .0.name())]
     MissingTool(crate::Tool),
+    /// A stream feature RDM's own downloader lacks; yt-dlp may handle it.
+    #[error("{0}")]
+    Unsupported(String),
     #[error("{0}")]
     Other(String),
     #[error("cancelled")]

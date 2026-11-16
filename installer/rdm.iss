@@ -34,6 +34,7 @@ WizardStyle=modern
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
+Name: "tools"; Description: "Download &yt-dlp and ffmpeg now (YouTube, video streams; about 170 MB, skipped if already installed)"; GroupDescription: "Video downloads:"
 Name: "autostart"; Description: "&Start RDM when I sign in to Windows (hidden in the system tray)"; GroupDescription: "Start-up:"; Flags: unchecked
 Name: "torrent"; Description: "Open .&torrent files and magnet links with RDM"; GroupDescription: "File types:"; Flags: unchecked
 
@@ -62,6 +63,9 @@ Root: HKA; Subkey: "Software\Classes\magnet"; ValueType: string; ValueName: "URL
 Root: HKA; Subkey: "Software\Classes\magnet\shell\open\command"; ValueType: string; ValueData: """{app}\rdm.exe"" ""%1"""; Tasks: torrent
 
 [Run]
+; Fetches the official builds (checksums verified) into RDM's data folder;
+; tools that are already there or on PATH are left alone.
+Filename: "{app}\rdm.exe"; Parameters: "--install-tools"; StatusMsg: "Downloading yt-dlp and ffmpeg (this can take a few minutes)..."; Flags: runasoriginaluser; Tasks: tools
 Filename: "{app}\rdm.exe"; Description: "Start RDM"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

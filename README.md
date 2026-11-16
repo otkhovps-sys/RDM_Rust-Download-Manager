@@ -15,14 +15,17 @@ up downloads, videos and audio from web pages.
   every server that supports range requests. Broken connections are retried
   automatically.
 - **Video and audio grabbing** - the browser extension detects media on a page
-  and shows a *Download this video* button over the player. HLS streams
-  (`.m3u8`, including AES-128 encrypted ones) are downloaded segment by segment
-  and joined into one file.
+  and shows a *Download this video* button over the player. Direct files, HLS
+  (`.m3u8`, including AES-128 encrypted ones) and DASH (`.mpd`) streams are
+  supported; streams whose picture and sound come separately are joined with
+  yt-dlp and ffmpeg. When a player hides its stream, RDM can still try the
+  page address itself.
 - **YouTube and other video sites** - on video pages the button sends the
   page to RDM, which lists the available qualities (up to 4K, or audio only
   as MP3) and downloads through [yt-dlp](https://github.com/yt-dlp/yt-dlp).
-  yt-dlp and ffmpeg are not bundled: RDM offers to download the official
-  builds the first time they are needed and verifies their checksums.
+  yt-dlp and ffmpeg are not bundled: the Windows installer downloads the
+  official builds during setup (skipped when they are already there), and RDM
+  offers the same the first time they are needed. Checksums are verified.
 - **System tray** - closing the window keeps RDM and its downloads running in
   the tray; the tray menu shows, adds, stops and resumes downloads, and
   *Exit* really quits.
@@ -53,8 +56,9 @@ Everything is on the
 
 - **Windows installer** (`rdm-<version>-setup.exe`) - installs for the current
   user without administrator rights, adds Start menu and optional desktop
-  shortcuts, and can start RDM with Windows and open `.torrent` files and
-  magnet links with it. Uninstall from *Settings → Apps* as usual.
+  shortcuts, downloads yt-dlp and ffmpeg, and can start RDM with Windows and
+  open `.torrent` files and magnet links with it. Uninstall from
+  *Settings → Apps* as usual.
 - **Portable archives** for Windows, Linux and macOS - unpack and run `rdm`
   (`rdm.exe` on Windows).
 
@@ -70,15 +74,20 @@ and RDM keeps its settings and download list in a `data` folder beside it.
 
 ## Browser extension
 
-The extension talks to RDM on `127.0.0.1:9614`; RDM must be running.
+RDM and the extension find each other by themselves (a local port between
+9614 and 9623 on `127.0.0.1`), so there is nothing to configure. On its first
+start RDM shows *Connect your browser* (later: *Tasks → Connect browser*), which
+opens the browser's extensions page for you and turns green once the extension
+is linked:
 
-- **Chrome / Edge / Brave / Opera**: open `chrome://extensions`, turn on
-  *Developer mode*, click *Load unpacked* and select the `extension` folder
-  (or the unpacked `rdm-extension-chrome-*.zip` from the release page).
+- **Chrome / Edge / Brave / Opera**: turn on *Developer mode*, click
+  *Load unpacked* and select the `extension` folder that came with RDM.
 - **Firefox**: download `rdm-extension-firefox-*.zip` from the release page,
   open `about:debugging#/runtime/this-firefox`, click *Load Temporary Add-on*
-  and select that zip file. (Firefox needs its own manifest, so the plain
-  `extension` folder is for Chromium browsers only.)
+  and select that zip file.
+
+Browsers install extensions without these steps only from their own web
+stores; RDM's extension is not published there yet.
 
 If RDM is not running, the browser simply keeps downloading as usual.
 

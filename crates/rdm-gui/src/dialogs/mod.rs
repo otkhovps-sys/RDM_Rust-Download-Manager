@@ -2,6 +2,7 @@
 //! returns whether it stays open; actions go back to the app as [`Command`]s.
 
 mod about;
+mod browser;
 mod complete;
 mod delete;
 mod file_info;
@@ -13,6 +14,7 @@ use rdm_core::{Download, DownloadId, Engine, RequestInfo, Settings};
 
 use crate::app::Command;
 use about::{show_about, show_credits};
+use browser::BrowserSetup;
 use complete::show_complete;
 use delete::DeleteConfirm;
 use file_info::{AddUrl, FileInfo};
@@ -29,6 +31,7 @@ pub struct Dialogs {
     options: Option<OptionsDialog>,
     pub about: bool,
     pub credits: bool,
+    browser: Option<BrowserSetup>,
     next_id: u64,
 }
 
@@ -36,6 +39,10 @@ impl Dialogs {
     /// No dialog is waiting for the user.
     pub fn is_empty(&self) -> bool {
         self.add_url.is_none() && self.file_info.is_empty()
+    }
+
+    pub fn open_browser_setup(&mut self) {
+        self.browser = Some(BrowserSetup::default());
     }
 
     pub fn open_add_url(&mut self) {
@@ -74,8 +81,20 @@ impl Dialogs {
         self.options = Some(OptionsDialog::new(settings));
     }
 
-    pub fn show(&mut self, ctx: &Context, engine: &Engine, downloads: &[Download]) -> Vec<Command> {
+    pub fn show(
+        &mut self,
+        ctx: &Context,
+        engine: &Engine,
+        downloads: &[Download],
+        extension: Option<(String, std::time::Duration)>,
+    ) -> Vec<Command> {
         let mut commands = Vec::new();
+
+        if let Some(dialog) = &mut self.browser
+            && !dialog.show(ctx, extension)
+        {
+            self.browser = None;
+        }
 
         if let Some(dialog) = &mut self.add_url {
             match dialog.show(ctx) {

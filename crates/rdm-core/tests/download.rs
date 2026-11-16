@@ -133,15 +133,7 @@ fn wait_for(engine: &Engine, id: u64, done: impl Fn(&Status) -> bool) -> rdm_cor
 
 fn add(engine: &Engine, port: u16, dir: &std::path::Path) -> u64 {
     let url = format!("http://127.0.0.1:{port}/files/test.bin");
-    let mut handle = engine.probe(&url, RequestInfo::default());
-    let start = Instant::now();
-    let probe = loop {
-        if let Some(result) = handle.try_take() {
-            break result.unwrap();
-        }
-        assert!(start.elapsed() < Duration::from_secs(10), "probe timeout");
-        std::thread::sleep(Duration::from_millis(10));
-    };
+    let probe = probe_now(engine, &url, RequestInfo::default()).unwrap();
     assert_eq!(probe.file_name, "test.bin");
     let mut new = NewDownload::from_probe(&probe, RequestInfo::default(), &engine.settings());
     new.save_dir = dir.to_path_buf();
@@ -244,13 +236,7 @@ fn hls_stream_with_aes128() {
     );
     let (engine, dir) = engine("hls");
     let url = format!("http://127.0.0.1:{port}/video/master.m3u8");
-    let mut handle = engine.probe(&url, RequestInfo::default());
-    let probe = loop {
-        if let Some(result) = handle.try_take() {
-            break result.unwrap();
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
+    let probe = probe_now(&engine, &url, RequestInfo::default()).unwrap();
     assert_eq!(probe.kind, rdm_core::Kind::Hls);
     assert_eq!(probe.hls_segments, Some(6));
     assert_eq!(probe.file_name, "master.ts");
@@ -348,15 +334,12 @@ fn torrent_from_local_seeder() {
     std::fs::write(&torrent_file, &torrent_bytes).unwrap();
 
     let (engine, _) = engine("torrent-client");
-    let mut handle = engine.probe(torrent_file.to_str().unwrap(), RequestInfo::default());
-    let start = Instant::now();
-    let probe = loop {
-        if let Some(result) = handle.try_take() {
-            break result.unwrap();
-        }
-        assert!(start.elapsed() < Duration::from_secs(30), "probe timeout");
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let probe = probe_now(
+        &engine,
+        torrent_file.to_str().unwrap(),
+        RequestInfo::default(),
+    )
+    .unwrap();
     assert_eq!(probe.kind, rdm_core::Kind::Torrent);
     assert_eq!(probe.file_name, "My Album");
     let meta = probe.torrent.clone().unwrap();
@@ -383,14 +366,10 @@ fn torrent_from_local_seeder() {
     std::mem::forget(rt);
 }
 
-/// Runs the whole web-page-video flow against a stand-in for yt-dlp that
-/// speaks the same command line and progress format.
+/// A stand-in for yt-dlp that speaks the same command line and progress
+/// format, installed (with an empty `ffmpeg`) into RDM's tools folder.
 #[cfg(unix)]
-#[test]
-fn page_video_through_yt_dlp() {
-    use std::os::unix::fs::PermissionsExt;
-
-    const FAKE_YT_DLP: &str = r#"#!/bin/sh
+const FAKE_YT_DLP: &str = r#"#!/bin/sh
 out=""; json=0; prev=""
 for a in "$@"; do
   [ "$prev" = "-o" ] && out="$a"
@@ -413,29 +392,50 @@ printf 'video-data' > "$file"
 echo "RDMFILE|$file"
 "#;
 
-    let (engine, dir) = engine("page");
-    let tools = rdm_core::data_dir().join("tools");
-    std::fs::create_dir_all(&tools).unwrap();
-    for (name, content) in [("yt-dlp", FAKE_YT_DLP), ("ffmpeg", "#!/bin/sh\n")] {
-        let path = tools.join(name);
-        std::fs::write(&path, content).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+#[cfg(unix)]
+fn install_fake_tools() {
+    use std::os::unix::fs::PermissionsExt;
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let tools = rdm_core::data_dir().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        for (name, content) in [("yt-dlp", FAKE_YT_DLP), ("ffmpeg", "#!/bin/sh\n")] {
+            let path = tools.join(name);
+            std::fs::write(&path, content).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    });
+}
+
+fn probe_now(
+    engine: &Engine,
+    url: &str,
+    request: RequestInfo,
+) -> rdm_core::Result<rdm_core::ProbeResult> {
+    let mut handle = engine.probe(url, request);
+    let start = Instant::now();
+    loop {
+        if let Some(result) = handle.try_take() {
+            return result;
+        }
+        assert!(start.elapsed() < Duration::from_secs(30), "probe timeout");
+        std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Runs the whole web-page-video flow through the yt-dlp stand-in.
+#[cfg(unix)]
+#[test]
+fn page_video_through_yt_dlp() {
+    let (engine, dir) = engine("page");
+    install_fake_tools();
     assert!(engine.tool_path(rdm_core::Tool::YtDlp).is_some());
 
     let request = RequestInfo {
         page: true,
         ..Default::default()
     };
-    let mut handle = engine.probe("https://video.example/watch?v=1", request.clone());
-    let start = Instant::now();
-    let probe = loop {
-        if let Some(result) = handle.try_take() {
-            break result.unwrap();
-        }
-        assert!(start.elapsed() < Duration::from_secs(20), "probe timeout");
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let probe = probe_now(&engine, "https://video.example/watch?v=1", request.clone()).unwrap();
     assert_eq!(probe.kind, rdm_core::Kind::Page);
     assert_eq!(probe.file_name, "My_ Video_.mp4");
     let labels: Vec<_> = probe.page.iter().map(|o| o.label.as_str()).collect();
@@ -453,5 +453,32 @@ echo "RDMFILE|$file"
     assert_eq!(d.file_name, "My_ Video_.mp4");
     assert_eq!(std::fs::read(d.path()).unwrap(), b"video-data");
     assert_eq!(d.size, Some(10));
+    engine.shutdown();
+}
+
+/// Streams RDM's own downloader cannot join (DASH, HLS with a separate audio
+/// track) are handed to yt-dlp.
+#[cfg(unix)]
+#[test]
+fn split_streams_go_to_yt_dlp() {
+    let master = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"en\",URI=\"audio.m3u8\"\n\
+                  #EXT-X-STREAM-INF:BANDWIDTH=900,AUDIO=\"a\"\nvideo.m3u8\n";
+    let port = serve_routes(
+        move |path| match path {
+            "/live/master.m3u8" => Some(Arc::new(master.as_bytes().to_vec())),
+            "/live/manifest.mpd" => Some(Arc::new(b"<MPD></MPD>".to_vec())),
+            _ => None,
+        },
+        false,
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let (engine, _) = engine("split");
+    install_fake_tools();
+    for file in ["master.m3u8", "manifest.mpd"] {
+        let url = format!("http://127.0.0.1:{port}/live/{file}");
+        let probe = probe_now(&engine, &url, RequestInfo::default()).unwrap();
+        assert_eq!(probe.kind, rdm_core::Kind::Page, "{file}");
+        assert!(!probe.page.is_empty());
+    }
     engine.shutdown();
 }

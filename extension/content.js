@@ -104,7 +104,8 @@
   function describe(item) {
     if (item.kind === "page") return `${item.site || "This page's"} video - choose quality in RDM`;
     const name = decodeURIComponent(new URL(item.url).pathname.split("/").pop() || "");
-    return `${item.kind === "hls" ? "HLS stream (m3u8)" : item.type || "Media file"} ${name}`;
+    const kind = { hls: "HLS stream (m3u8)", dash: "DASH stream (mpd)" }[item.kind] || item.type || "Media file";
+    return `${kind} ${name}`;
   }
 
   /** What can be downloaded here: the background's list plus the video's own address. */
