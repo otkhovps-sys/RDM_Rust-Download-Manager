@@ -8,6 +8,11 @@ name: Release
 #     (so: bump the version, push, done),
 #   * a tag like `v1.2.0` is pushed, or
 #   * the workflow is run by hand with a version.
+#
+# The release is published as soon as the Windows and Linux builds are
+# ready. The macOS builds follow and are added to it: GitHub's macOS
+# machines are scarce, and a job that waits too long for one is cancelled
+# (re-run that job later to add the missing files).
 on:
   push:
     branches: ["**"]
@@ -69,8 +74,6 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: rdm }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: rdm.exe }
-          - { os: macos-latest, target: aarch64-apple-darwin, exe: rdm }
-          - { os: macos-latest, target: x86_64-apple-darwin, exe: rdm }
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ needs.plan.outputs.tag }}
@@ -191,8 +194,35 @@ jobs:
           files: artifacts/*
           generate_release_notes: true
 
+  # Both Mac builds (Apple silicon and Intel) share one machine.
+  macos:
+    needs: [plan, publish]
+    runs-on: macos-latest
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and package
+        run: |
+          mkdir dist
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --target "$target" -p rdm-gui
+            name="rdm-${TAG}-${target}"
+            mkdir "dist/$name"
+            cp "target/$target/release/rdm" "dist/$name/"
+            cp -r extension README.md LICENSE CREDITS.md "dist/$name/"
+            tar czf "dist/$name.tar.gz" -C dist "$name"
+          done
+      - name: Add to the release
+        run: gh release upload "$TAG" dist/*.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+
   report-failure:
-    needs: [plan, build, extension, publish]
+    needs: [plan, build, extension, publish, macos]
     if: failure()
     uses: ./.github/workflows/report-failure.yml
     with:
