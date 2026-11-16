@@ -138,8 +138,8 @@ impl BrowserSetup {
             );
             button_row(ui, |ui| open = !ui.button("Close").clicked());
         });
-        // Keep the indicator live while the guide is open.
-        ctx.request_repaint_after(Duration::from_secs(1));
+        // No polling needed: the server wakes the window when the extension
+        // says hello, which is the only thing that changes the indicator.
         open
     }
 }
