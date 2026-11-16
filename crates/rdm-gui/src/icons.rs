@@ -15,9 +15,42 @@ pub enum Icon {
     About,
 }
 
-const WHITE: Color32 = Color32::WHITE;
+/// Icon colours for one theme: saturated with white symbols on a light
+/// window, soft pastel with dark symbols on a dark one.
+struct Palette {
+    blue: Color32,
+    green: Color32,
+    orange: Color32,
+    red: Color32,
+    purple: Color32,
+    gray: Color32,
+    /// The symbol drawn on top of the coloured shape.
+    symbol: Color32,
+}
 
-pub fn paint(painter: &Painter, rect: Rect, icon: Icon, enabled: bool) {
+const LIGHT: Palette = Palette {
+    blue: Color32::from_rgb(30, 136, 229),
+    green: Color32::from_rgb(67, 160, 71),
+    orange: Color32::from_rgb(251, 140, 0),
+    red: Color32::from_rgb(229, 57, 53),
+    purple: Color32::from_rgb(94, 53, 177),
+    gray: Color32::from_rgb(96, 110, 125),
+    symbol: Color32::WHITE,
+};
+
+const DARK: Palette = Palette {
+    blue: Color32::from_rgb(100, 181, 246),
+    green: Color32::from_rgb(129, 199, 132),
+    orange: Color32::from_rgb(255, 183, 77),
+    red: Color32::from_rgb(239, 110, 105),
+    purple: Color32::from_rgb(179, 157, 219),
+    gray: Color32::from_rgb(176, 190, 197),
+    symbol: Color32::from_rgb(24, 26, 30),
+};
+
+/// Draws `icon` in the colours of the current theme (`dark`).
+pub fn paint(painter: &Painter, rect: Rect, icon: Icon, enabled: bool, dark: bool) {
+    let p = if dark { &DARK } else { &LIGHT };
     let c = rect.center();
     let r = rect.width().min(rect.height()) * 0.45;
     let tint = |color: Color32| {
@@ -27,35 +60,43 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, enabled: bool) {
             color.gamma_multiply(0.35)
         }
     };
-    let line = Stroke::new(r * 0.22, WHITE);
+    let line = Stroke::new(r * 0.22, p.symbol);
     match icon {
         Icon::Add => {
-            painter.circle_filled(c, r, tint(Color32::from_rgb(30, 136, 229)));
+            painter.circle_filled(c, r, tint(p.blue));
             painter.line_segment([c - vec2(r * 0.5, 0.0), c + vec2(r * 0.5, 0.0)], line);
             painter.line_segment([c - vec2(0.0, r * 0.5), c + vec2(0.0, r * 0.5)], line);
         }
         Icon::Resume => {
-            painter.circle_filled(c, r, tint(Color32::from_rgb(67, 160, 71)));
+            painter.circle_filled(c, r, tint(p.green));
             let pts = vec![
                 c + vec2(-r * 0.3, -r * 0.45),
                 c + vec2(r * 0.5, 0.0),
                 c + vec2(-r * 0.3, r * 0.45),
             ];
-            painter.add(Shape::convex_polygon(pts, WHITE, Stroke::NONE));
+            painter.add(Shape::convex_polygon(pts, p.symbol, Stroke::NONE));
         }
         Icon::Stop => {
-            painter.circle_filled(c, r, tint(Color32::from_rgb(251, 140, 0)));
+            painter.circle_filled(c, r, tint(p.orange));
             let bar = vec2(r * 0.22, r * 0.9);
             for dx in [-r * 0.22, r * 0.22] {
-                painter.rect_filled(Rect::from_center_size(c + vec2(dx, 0.0), bar), 1.0, WHITE);
+                painter.rect_filled(
+                    Rect::from_center_size(c + vec2(dx, 0.0), bar),
+                    1.0,
+                    p.symbol,
+                );
             }
         }
         Icon::StopAll => {
-            painter.circle_filled(c, r, tint(Color32::from_rgb(229, 57, 53)));
-            painter.rect_filled(Rect::from_center_size(c, Vec2::splat(r * 0.8)), 2.0, WHITE);
+            painter.circle_filled(c, r, tint(p.red));
+            painter.rect_filled(
+                Rect::from_center_size(c, Vec2::splat(r * 0.8)),
+                2.0,
+                p.symbol,
+            );
         }
         Icon::Delete | Icon::DeleteCompleted => {
-            let color = tint(Color32::from_rgb(120, 130, 140));
+            let color = tint(p.gray);
             let body = Rect::from_min_max(c + vec2(-r * 0.6, -r * 0.5), c + vec2(r * 0.6, r));
             painter.rect_filled(body, r * 0.15, color);
             painter.rect_filled(
@@ -70,8 +111,8 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, enabled: bool) {
             );
             if matches!(icon, Icon::DeleteCompleted) {
                 let badge = c + vec2(r * 0.55, r * 0.55);
-                painter.circle_filled(badge, r * 0.42, tint(Color32::from_rgb(67, 160, 71)));
-                let check = Stroke::new(r * 0.14, WHITE);
+                painter.circle_filled(badge, r * 0.42, tint(p.green));
+                let check = Stroke::new(r * 0.14, p.symbol);
                 let s = r * 0.2;
                 painter.line_segment(
                     [badge + vec2(-s, 0.0), badge + vec2(-s * 0.2, s * 0.8)],
@@ -88,13 +129,13 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, enabled: bool) {
                 for dx in [-r * 0.25, 0.0, r * 0.25] {
                     painter.line_segment(
                         [c + vec2(dx, -r * 0.25), c + vec2(dx, r * 0.75)],
-                        Stroke::new(r * 0.08, WHITE),
+                        Stroke::new(r * 0.08, p.symbol),
                     );
                 }
             }
         }
         Icon::Options => {
-            let color = tint(Color32::from_rgb(96, 110, 125));
+            let color = tint(p.gray);
             for i in 0..8 {
                 let a = i as f32 * std::f32::consts::TAU / 8.0;
                 let dir = vec2(a.cos(), a.sin());
@@ -104,11 +145,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, enabled: bool) {
                 );
             }
             painter.circle_filled(c, r * 0.68, color);
-            painter.circle_filled(c, r * 0.28, WHITE);
+            painter.circle_filled(c, r * 0.28, p.symbol);
         }
         Icon::About => {
-            painter.circle_filled(c, r, tint(Color32::from_rgb(94, 53, 177)));
-            painter.circle_filled(c + vec2(0.0, -r * 0.45), r * 0.13, WHITE);
+            painter.circle_filled(c, r, tint(p.purple));
+            painter.circle_filled(c + vec2(0.0, -r * 0.45), r * 0.13, p.symbol);
             painter.line_segment([c + vec2(0.0, -r * 0.15), c + vec2(0.0, r * 0.55)], line);
         }
     }

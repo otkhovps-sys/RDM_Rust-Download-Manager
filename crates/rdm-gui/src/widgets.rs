@@ -26,7 +26,7 @@ pub fn tool_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Respo
         ui.painter().rect_filled(rect, 4.0, fill);
     }
     let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 20.0), vec2(30.0, 30.0));
-    icons::paint(ui.painter(), icon_rect, icon, enabled);
+    icons::paint(ui.painter(), icon_rect, icon, enabled, visuals.dark_mode);
     let text_color = if enabled {
         visuals.text_color()
     } else {

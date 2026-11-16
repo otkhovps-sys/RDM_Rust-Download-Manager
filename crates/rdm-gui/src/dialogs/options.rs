@@ -165,6 +165,32 @@ impl OptionsDialog {
             "Show the \"Download complete\" dialog",
         );
         ui.add_space(6.0);
+        ui.label("Background picture:");
+        ui.horizontal(|ui| {
+            let shown = s
+                .background_image
+                .as_ref()
+                .map_or("None".to_owned(), |p| p.display().to_string());
+            ui.add(egui::Label::new(egui::RichText::new(shown).weak()).truncate());
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Choose...").clicked()
+                && let Some(file) = rfd::FileDialog::new()
+                    .add_filter("Pictures", &["png", "jpg", "jpeg", "webp", "bmp"])
+                    .pick_file()
+            {
+                s.background_image = Some(file);
+            }
+            if ui
+                .add_enabled(s.background_image.is_some(), egui::Button::new("Remove"))
+                .clicked()
+            {
+                s.background_image = None;
+            }
+            ui.label("Strength:");
+            ui.add(egui::Slider::new(&mut s.background_strength, 5..=100).suffix("%"));
+        });
+        ui.add_space(6.0);
         ui.label("User agent used when the browser does not send one:");
         ui.add(egui::TextEdit::singleline(&mut s.user_agent).desired_width(f32::INFINITY));
     }

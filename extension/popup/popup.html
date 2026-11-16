@@ -5,16 +5,37 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header><img src="../icons/32.png" alt=""><b>RDM</b><span id="version"></span></header>
-  <section><span id="dot" class="dot"></span><span id="status">Checking...</span></section>
-  <section>
-    <label><input type="checkbox" id="capture"> Send browser downloads to RDM</label>
-  </section>
-  <section>
-    <b>On this page</b>
-    <ul id="media"></ul>
-    <button id="page" class="wide">Download the video on this page</button>
-  </section>
+  <header>
+    <img src="../icons/48.png" alt="">
+    <div>
+      <b>RDM</b>
+      <span id="status" class="status">Checking...</span>
+    </div>
+    <span id="version" class="version"></span>
+  </header>
+
+  <main>
+    <section id="found" hidden>
+      <h2>On this page</h2>
+      <div id="primary"></div>
+      <button id="toggle" class="link" hidden></button>
+      <div id="others" hidden></div>
+    </section>
+    <p id="empty" class="empty" hidden>
+      No video or audio found here yet.<br>Play it for a moment, then open this again.
+    </p>
+    <p id="offline" class="empty" hidden>
+      RDM is not running.<br>Start it and this turns green by itself.
+    </p>
+  </main>
+
+  <footer>
+    <label class="switch">
+      <input type="checkbox" id="capture">
+      <span class="track"></span>
+      <span>Send browser downloads to RDM</span>
+    </label>
+  </footer>
   <script src="popup.js"></script>
 </body>
 </html>

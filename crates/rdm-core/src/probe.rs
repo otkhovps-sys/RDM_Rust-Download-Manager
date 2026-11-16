@@ -21,6 +21,8 @@ pub struct ProbeResult {
     pub torrent: Option<crate::TorrentMeta>,
     /// Qualities of a web page video, best first (empty for everything else).
     pub page: Vec<crate::PageOption>,
+    /// The page only answered with the browser's cookies (signed-in content).
+    pub used_cookies: bool,
 }
 
 pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<ProbeResult> {
@@ -119,6 +121,7 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
         hls_segments: None,
         torrent: None,
         page: Vec::new(),
+        used_cookies: false,
     })
 }
 
@@ -150,5 +153,6 @@ async fn probe_hls(
         hls_segments: Some(playlist.segments.len()),
         torrent: None,
         page: Vec::new(),
+        used_cookies: false,
     })
 }

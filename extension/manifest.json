@@ -2,10 +2,10 @@
   "manifest_version": 3,
   "name": "RDM - Rust Download Manager",
   "short_name": "RDM",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Send downloads, videos (YouTube and more), audio and torrents to RDM, the fast multi-connection download manager.",
   "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
-  "permissions": ["downloads", "contextMenus", "cookies", "webRequest", "storage", "tabs"],
+  "permissions": ["downloads", "contextMenus", "cookies", "webRequest", "webNavigation", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [

@@ -2,10 +2,12 @@
 //! knows). RDM runs the `yt-dlp` program and follows its progress output.
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
 
@@ -22,7 +24,7 @@ const DONE: &str = "after_move:RDMFILE|%(filepath)s";
 
 /// Sites where a page URL means "the video on this page".
 pub(crate) fn is_video_site(url: &str) -> bool {
-    const HOSTS: [&str; 14] = [
+    const HOSTS: &[&str] = &[
         "youtube.com",
         "youtu.be",
         "youtube-nocookie.com",
@@ -30,6 +32,7 @@ pub(crate) fn is_video_site(url: &str) -> bool {
         "dailymotion.com",
         "twitch.tv",
         "tiktok.com",
+        "douyin.com",
         "facebook.com",
         "fb.watch",
         "instagram.com",
@@ -37,7 +40,22 @@ pub(crate) fn is_video_site(url: &str) -> bool {
         "twitter.com",
         "bilibili.com",
         "soundcloud.com",
+        "reddit.com",
+        "pinterest.com",
+        "vk.com",
+        "ok.ru",
+        "rumble.com",
+        "bitchute.com",
+        "odysee.com",
+        "streamable.com",
+        "nicovideo.jp",
+        "weibo.com",
+        "tumblr.com",
+        "linkedin.com",
+        "ted.com",
+        "kick.com",
     ];
+
     let host = url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
@@ -82,27 +100,15 @@ impl Format {
 /// Asks yt-dlp what the page offers, without downloading.
 pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<ProbeResult> {
     let ytdlp = ctx.tools.require(Tool::YtDlp)?;
-    let output = hidden(Command::new(ytdlp))
-        .args(header_args(req))
-        .args([
-            "--dump-single-json",
-            "--no-playlist",
-            "--no-warnings",
-            "--encoding",
-            "utf-8",
-            "--",
-        ])
-        .arg(url)
-        .stdin(Stdio::null())
-        .output()
-        .await?;
-    if !output.status.success() {
-        return Err(Error::other(last_error(&String::from_utf8_lossy(
-            &output.stderr,
-        ))));
-    }
-    let info: Info = serde_json::from_slice(&output.stdout)
-        .map_err(|e| Error::other(format!("unexpected yt-dlp output: {e}")))?;
+    // Anonymous first; the browser's cookies only when the site insists
+    // (private, age-restricted or "sign in to continue" pages).
+    let (info, used_cookies) = match dump_info(&ytdlp, url, req, None).await {
+        Ok(info) => (info, false),
+        Err(e) => match CookieFile::create(req).await {
+            Some(cookies) => (dump_info(&ytdlp, url, req, Some(&cookies)).await?, true),
+            None => return Err(e),
+        },
+    };
 
     let options = options(&info.formats, ctx.tools.find(Tool::Ffmpeg).is_some());
     let title = sanitize_file_name(info.title.as_deref().unwrap_or("video"));
@@ -116,7 +122,74 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
         hls_segments: None,
         torrent: None,
         page: options,
+        used_cookies,
     })
+}
+
+async fn dump_info(
+    ytdlp: &Path,
+    url: &str,
+    req: &RequestInfo,
+    cookies: Option<&CookieFile>,
+) -> Result<Info> {
+    let mut command = hidden(Command::new(ytdlp));
+    command.args(header_args(req)).args([
+        "--dump-single-json",
+        "--no-playlist",
+        "--no-warnings",
+        "--encoding",
+        "utf-8",
+    ]);
+    if let Some(cookies) = cookies {
+        command.arg("--cookies").arg(&cookies.0);
+    }
+    let output = command
+        .arg("--")
+        .arg(url)
+        .stdin(Stdio::null())
+        .output()
+        .await?;
+    if !output.status.success() {
+        return Err(Error::other(last_error(&String::from_utf8_lossy(
+            &output.stderr,
+        ))));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| Error::other(format!("unexpected yt-dlp output: {e}")))
+}
+
+/// The browser's cookies written to a private temporary file for yt-dlp;
+/// the file is deleted when this value is dropped.
+struct CookieFile(PathBuf);
+
+impl CookieFile {
+    async fn create(req: &RequestInfo) -> Option<Self> {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let text = req
+            .cookie_file
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())?;
+        let name = format!(
+            "rdm-cookies-{}-{}.txt",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let file = Self(std::env::temp_dir().join(name));
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut handle = options.open(&file.0).await.ok()?;
+        handle.write_all(text.as_bytes()).await.ok()?;
+        handle.flush().await.ok()?;
+        Some(file)
+    }
+}
+
+impl Drop for CookieFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Builds the quality list, best first. Without ffmpeg only formats that
@@ -283,6 +356,11 @@ pub(crate) async fn run(
         .arg(dir.join(format!("{}.%(ext)s", stem.replace('%', "%%"))));
     if let Some(ffmpeg) = ffmpeg {
         command.arg("--ffmpeg-location").arg(ffmpeg);
+    }
+    // Kept only when the probe needed them (see `NewDownload::from_probe`).
+    let cookies = CookieFile::create(&request).await;
+    if let Some(cookies) = &cookies {
+        command.arg("--cookies").arg(&cookies.0);
     }
     if ctx.limiter.rate() > 0 {
         command.args(["-r", &ctx.limiter.rate().to_string()]);
@@ -481,6 +559,7 @@ mod tests {
             cookies: Some("a=1".into()),
             user_agent: Some("UA".into()),
             page: false,
+            cookie_file: None,
         };
         assert_eq!(
             header_args(&req),

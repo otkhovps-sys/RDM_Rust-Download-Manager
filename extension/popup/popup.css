@@ -1,16 +1,52 @@
-body { width: 350px; margin: 0; font: 13px system-ui, sans-serif; color: #222; }
-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #1e88e5; color: #fff; }
-header img { width: 22px; height: 22px; }
-header b { font-size: 14px; }
-header span { margin-left: auto; opacity: .8; }
-section { padding: 10px 12px; border-bottom: 1px solid #eee; }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: #e53935; }
-.dot.ok { background: #43a047; }
-label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
-ul { list-style: none; margin: 6px 0; padding: 0; max-height: 240px; overflow: auto; }
-li { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #f2f2f2; }
-li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-li small, .muted { color: #777; }
-button { border: 0; border-radius: 4px; padding: 5px 9px; background: #1e88e5; color: #fff; cursor: pointer; }
-button:hover { background: #1565c0; }
-button.wide { width: 100%; margin-top: 4px; }
+:root {
+  --bg: #ffffff; --fg: #1d2330; --muted: #6b7385; --line: #e8ebf1; --hover: #f1f6fd;
+  --accent: #1e88e5; --accent-fg: #ffffff; --ok: #2e9e4f; --off: #d64545;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f232b; --fg: #e9edf5; --muted: #9aa3b5; --line: #2e3440; --hover: #29303b;
+    --accent: #64b5f6; --accent-fg: #10141a; --ok: #6fcf8a; --off: #ef7b7b;
+  }
+}
+* { box-sizing: border-box; }
+body { width: 360px; margin: 0; background: var(--bg); color: var(--fg);
+       font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+header { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+         background: linear-gradient(135deg, #42a5f5, #1565c0); color: #fff; }
+header img { width: 34px; height: 34px; border-radius: 9px; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+header b { display: block; font-size: 15px; letter-spacing: .2px; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: .95; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #ffb3b3; }
+.status.ok::before { background: #9af0b3; }
+.version { margin-left: auto; font-size: 12px; opacity: .8; }
+
+main { padding: 12px 14px 4px; }
+h2 { margin: 0 0 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.empty { margin: 14px 0 16px; text-align: center; color: var(--muted); }
+
+.row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; margin-bottom: 6px;
+       border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: inherit;
+       text-align: left; font: inherit; cursor: pointer; transition: background .12s, border-color .12s; }
+.row:hover { background: var(--hover); border-color: var(--accent); }
+.row .icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
+             background: var(--hover); color: var(--accent); }
+.row.best { border-color: var(--accent); }
+.row.best .icon { background: var(--accent); color: var(--accent-fg); }
+.row .text { min-width: 0; flex: 1; }
+.row .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .detail { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-fg);
+        font-size: 11px; font-weight: 700; }
+.link { margin: 2px 0 8px; padding: 0; border: 0; background: none; color: var(--accent);
+        font: inherit; font-weight: 600; cursor: pointer; }
+#others { max-height: 232px; overflow: auto; }
+
+footer { padding: 10px 14px 12px; border-top: 1px solid var(--line); }
+.switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.switch input { display: none; }
+.track { flex: none; position: relative; width: 34px; height: 20px; border-radius: 999px; background: var(--line); transition: background .15s; }
+.track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+                background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .15s; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(14px); }

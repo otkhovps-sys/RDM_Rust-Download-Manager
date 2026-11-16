@@ -19,13 +19,19 @@ up downloads, videos and audio from web pages.
   (`.m3u8`, including AES-128 encrypted ones) and DASH (`.mpd`) streams are
   supported; streams whose picture and sound come separately are joined with
   yt-dlp and ffmpeg. When a player hides its stream, RDM can still try the
-  page address itself.
+  page address itself. In feeds (TikTok, Reels, ...) the button offers the
+  one video you are pointing at - found through the link to its own page -
+  instead of every clip the feed has preloaded; those sit under *More*.
 - **YouTube and other video sites** - on video pages the button sends the
   page to RDM, which lists the available qualities (up to 4K, or audio only
   as MP3) and downloads through [yt-dlp](https://github.com/yt-dlp/yt-dlp).
   yt-dlp and ffmpeg are not bundled: the Windows installer downloads the
   official builds during setup (skipped when they are already there), and RDM
-  offers the same the first time they are needed. Checksums are verified.
+  offers the same the first time they are needed. Checksums are verified, and
+  the yt-dlp copy RDM installed keeps itself up to date, because video sites
+  change often. Pages that need you to be signed in (private or
+  age-restricted videos) are retried with the browser's cookies for that
+  site; pages that work without them never get the cookies.
 - **System tray** - closing the window keeps RDM and its downloads running in
   the tray; the tray menu shows, adds, stops and resumes downloads, and
   *Exit* really quits.
@@ -39,7 +45,9 @@ up downloads, videos and audio from web pages.
   context menu.
 - **IDM-like interface** - toolbar, category tree (Compressed, Documents,
   Music, Programs, Video), sortable list, *Download File Info*, progress window
-  with per-connection details and *Download complete* dialog.
+  with per-connection details and *Download complete* dialog. Light and dark
+  themes with matching icons, and an optional background picture
+  (*Options → General*).
 - **Queue and speed limiter** - choose how many downloads run at once,
   connections per download and a global speed limit.
 - **Light** - a single native binary of a few MB, no runtime, no bundled
@@ -149,6 +157,7 @@ crates/rdm-gui      the desktop app (egui), binary name `rdm`
   src/table.rs      download list
   src/dialogs/      add URL, file info, progress, options, ...
   src/tray.rs       system tray icon and menu
+  src/background.rs optional background picture
   src/server.rs     local endpoint for the browser extension
 extension/          browser extension (Manifest V3, Chrome + Firefox)
   background.js     entry point; the modules live in src/

@@ -40,6 +40,8 @@ struct DownloadBody {
     /// `url` is a web page with a video (YouTube, ...), not a file.
     #[serde(default)]
     page: bool,
+    /// The page's cookies as `cookies.txt` text, for signed-in video pages.
+    cookie_file: Option<String>,
 }
 
 /// RDM listens on the first free port of this range and the extension looks
@@ -143,6 +145,7 @@ fn handle(
                         cookies: body.cookies,
                         user_agent: body.user_agent,
                         page: body.page,
+                        cookie_file: body.cookie_file,
                     },
                     file_name: body.file_name,
                 }));

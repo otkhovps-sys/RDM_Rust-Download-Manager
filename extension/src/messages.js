@@ -4,15 +4,17 @@ import { captureEnabled, getSettings, ping, sendToApp, setSettings } from "./app
 import { listFor } from "./media.js";
 
 const handlers = {
-  /** Downloadable items of a tab. */
-  list: (msg, sender) => listFor(msg.tabId ?? sender.tab?.id, msg.pageUrl || sender.tab?.url, Boolean(msg.hasVideo)),
+  /** What a tab offers: `{primary, others}` (see media.js). */
+  list: (msg, sender) =>
+    listFor(msg.tabId ?? sender.tab?.id, { pageUrl: sender.tab?.url, ...msg.context }),
 
+  /** Sends one entry of that list to RDM. */
   download: (msg, sender) =>
     sendToApp({
-      url: msg.url,
-      page: Boolean(msg.page),
+      url: msg.item.url,
+      page: msg.item.kind === "page",
       referer: msg.referer || sender.tab?.url,
-      fileName: msg.fileName,
+      fileName: msg.title,
     }),
 
   /** A magnet link was clicked: take it only while RDM handles downloads. */

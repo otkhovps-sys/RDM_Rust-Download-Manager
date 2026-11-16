@@ -370,12 +370,17 @@ fn torrent_from_local_seeder() {
 /// format, installed (with an empty `ffmpeg`) into RDM's tools folder.
 #[cfg(unix)]
 const FAKE_YT_DLP: &str = r#"#!/bin/sh
-out=""; json=0; prev=""
+out=""; json=0; prev=""; cookies=0; url=""
 for a in "$@"; do
   [ "$prev" = "-o" ] && out="$a"
   [ "$a" = "--dump-single-json" ] && json=1
-  prev="$a"
+  [ "$a" = "--cookies" ] && cookies=1
+  [ "$a" = "-U" ] && exit 0
+  prev="$a"; url="$a"
 done
+case "$url" in *private*)
+  if [ $cookies = 0 ]; then echo "ERROR: Sign in to confirm your age" >&2; exit 1; fi;;
+esac
 if [ $json = 1 ]; then
   echo '{"title":"My: Video?","formats":[
     {"height":null,"vcodec":"none","acodec":"opus","ext":"webm","filesize":1000},
@@ -480,5 +485,43 @@ fn split_streams_go_to_yt_dlp() {
         assert_eq!(probe.kind, rdm_core::Kind::Page, "{file}");
         assert!(!probe.page.is_empty());
     }
+    engine.shutdown();
+}
+
+/// Signed-in content: the first try is anonymous, the browser's cookies are
+/// used (and kept for the download) only when the site refuses without them.
+#[cfg(unix)]
+#[test]
+fn page_that_needs_cookies() {
+    let (engine, _) = engine("cookies");
+    install_fake_tools();
+    let request = RequestInfo {
+        page: true,
+        cookie_file: Some(
+            "# Netscape HTTP Cookie File\n.video.example\tTRUE\t/\tTRUE\t0\tsid\tabc\n".into(),
+        ),
+        ..Default::default()
+    };
+
+    let public = probe_now(&engine, "https://video.example/watch?v=1", request.clone()).unwrap();
+    assert!(!public.used_cookies);
+    let new = NewDownload::from_probe(&public, request.clone(), &engine.settings());
+    assert_eq!(
+        new.request.cookie_file, None,
+        "cookies are dropped when not needed"
+    );
+
+    let private = probe_now(&engine, "https://video.example/private/2", request.clone()).unwrap();
+    assert!(private.used_cookies);
+    let new = NewDownload::from_probe(&private, request.clone(), &engine.settings());
+    assert!(new.request.cookie_file.is_some());
+
+    // Without cookies to offer, the site's own message is reported.
+    let anonymous = RequestInfo {
+        page: true,
+        ..Default::default()
+    };
+    let error = probe_now(&engine, "https://video.example/private/2", anonymous).unwrap_err();
+    assert!(error.to_string().contains("Sign in"), "{error}");
     engine.shutdown();
 }

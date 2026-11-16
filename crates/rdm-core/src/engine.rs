@@ -53,7 +53,11 @@ pub struct NewDownload {
 }
 
 impl NewDownload {
-    pub fn from_probe(probe: &ProbeResult, request: RequestInfo, settings: &Settings) -> Self {
+    pub fn from_probe(probe: &ProbeResult, mut request: RequestInfo, settings: &Settings) -> Self {
+        // Browser cookies are kept only for pages that need them.
+        if !probe.used_cookies {
+            request.cookie_file = None;
+        }
         let category = match (probe.kind, &probe.torrent) {
             (Kind::Hls | Kind::Page, _) => Category::Video,
             // A torrent is filed under the type of its biggest file.
@@ -194,6 +198,8 @@ impl Engine {
             dirty: AtomicBool::new(false),
         });
         runtime.spawn(scheduler(inner.clone()));
+        let updater = inner.clone();
+        runtime.spawn(async move { updater.tools.update_ytdlp().await });
         Ok(Self {
             inner,
             _runtime: Arc::new(runtime),

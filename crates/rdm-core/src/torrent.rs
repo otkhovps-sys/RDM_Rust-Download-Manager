@@ -120,6 +120,7 @@ impl TorrentClient {
             hls_segments: None,
             torrent: Some(meta),
             page: Vec::new(),
+            used_cookies: false,
         })
     }
 

@@ -12,6 +12,7 @@ use egui::{Color32, RichText, Ui};
 use rdm_core::util::format_speed;
 use rdm_core::{Category, Download, DownloadId, Engine, Event, Status};
 
+use crate::background::Background;
 use crate::dialogs::Dialogs;
 use crate::icons::{self, Icon};
 use crate::server::{self, Link, Message};
@@ -77,6 +78,7 @@ pub struct RdmApp {
     last_frame: Instant,
     /// `None` forces a refresh on the next frame.
     list_taken: Option<Instant>,
+    background: Background,
     /// `None` when the desktop has no system tray.
     tray: Option<Tray>,
     /// Set by "Exit": the next close request really ends the program.
@@ -120,6 +122,7 @@ impl RdmApp {
             downloads: Vec::new(),
             last_frame: Instant::now(),
             list_taken: None,
+            background: Background::default(),
             tray,
             quit_requested: None,
             filter: Filter {
@@ -518,6 +521,7 @@ impl eframe::App for RdmApp {
         }
         self.last_frame = Instant::now();
 
+        self.background.paint(ui, &self.engine.settings());
         let mut commands = self.shortcuts(&ctx);
         egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui, &mut commands));
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui, &mut commands));

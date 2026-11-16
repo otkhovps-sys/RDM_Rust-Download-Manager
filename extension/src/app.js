@@ -72,6 +72,33 @@ export async function captureEnabled() {
   return Boolean(app && app.enabled && (await getSettings()).capture);
 }
 
+/**
+ * The browser's cookies for a page as Netscape `cookies.txt` text. RDM hands
+ * it to yt-dlp only if the page cannot be fetched anonymously (private or
+ * age-restricted videos, "sign in to continue").
+ */
+async function cookieFileFor(url) {
+  try {
+    const cookies = await chrome.cookies.getAll({ url });
+    if (!cookies.length) return "";
+    const lines = cookies.map((c) => {
+      const domain = c.hostOnly || c.domain.startsWith(".") ? c.domain : `.${c.domain}`;
+      return [
+        (c.httpOnly ? "#HttpOnly_" : "") + domain,
+        c.hostOnly ? "FALSE" : "TRUE",
+        c.path,
+        c.secure ? "TRUE" : "FALSE",
+        Math.floor(c.expirationDate || 0),
+        c.name,
+        c.value,
+      ].join("\t");
+    });
+    return ["# Netscape HTTP Cookie File", ...lines, ""].join("\n");
+  } catch {
+    return "";
+  }
+}
+
 async function cookiesFor(url) {
   if (!/^https?:/i.test(url)) return "";
   try {
@@ -95,8 +122,10 @@ export async function sendToApp({ url, referer, fileName, page = false }) {
     page,
     referer: referer || undefined,
     fileName: fileName || undefined,
-    // Video pages are fetched by yt-dlp, which handles these itself.
+    // Files and streams get the cookies as a header; video pages get them
+    // as a cookie file that is used only when the site demands signing in.
     cookies: page ? undefined : (await cookiesFor(url)) || undefined,
+    cookieFile: page ? (await cookieFileFor(url)) || undefined : undefined,
     userAgent: navigator.userAgent,
   };
   let reply = await request(found.port, "/download", body, 1500);

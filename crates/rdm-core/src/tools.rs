@@ -17,6 +17,7 @@ use tokio::process::Command;
 use crate::{Error, Result};
 
 const YTDLP_RELEASE: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
+const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3 * 24 * 3600);
 const FFMPEG_RELEASE: &str = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +135,28 @@ impl Tools {
         std::env::split_paths(&path)
             .map(|dir| dir.join(&name))
             .find(|p| p.is_file())
+    }
+
+    /// Video sites change often, so the copy of yt-dlp that RDM installed is
+    /// kept current with yt-dlp's own updater, at most once per interval.
+    /// A yt-dlp found elsewhere on the system is never touched.
+    pub async fn update_ytdlp(&self) {
+        let own = self.dir.join(Tool::YtDlp.file_name());
+        let marker = self.dir.join("yt-dlp.updated");
+        let checked_recently = std::fs::metadata(&marker)
+            .and_then(|m| m.modified())
+            .is_ok_and(|at| at.elapsed().is_ok_and(|age| age < UPDATE_INTERVAL));
+        if !own.is_file() || checked_recently {
+            return;
+        }
+        let _ = tokio::fs::write(&marker, b"").await;
+        let _ = hidden(Command::new(own))
+            .arg("-U")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
     }
 
     pub fn require(&self, tool: Tool) -> Result<PathBuf> {

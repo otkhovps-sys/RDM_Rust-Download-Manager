@@ -38,6 +38,10 @@ pub struct Settings {
     pub close_to_tray: bool,
     /// The "Connect your browser" guide was shown once.
     pub browser_setup_done: bool,
+    /// Picture shown behind the main window, if any.
+    pub background_image: Option<PathBuf>,
+    /// How strongly the picture shows through, in percent.
+    pub background_strength: u8,
 }
 
 impl Default for Settings {
@@ -63,6 +67,8 @@ impl Default for Settings {
             dark_mode: false,
             close_to_tray: true,
             browser_setup_done: false,
+            background_image: None,
+            background_strength: 30,
         }
     }
 }
@@ -86,6 +92,7 @@ impl Settings {
         self.connections = self.connections.clamp(1, 32);
         self.max_active = self.max_active.clamp(1, 20);
         self.max_retries = self.max_retries.min(100);
+        self.background_strength = self.background_strength.min(100);
         self
     }
 }

@@ -86,6 +86,10 @@ pub struct RequestInfo {
     /// The URL is a web page showing a video, not a file (use yt-dlp).
     #[serde(default)]
     pub page: bool,
+    /// The browser's cookies for the page in Netscape `cookies.txt` form.
+    /// Only used when a video page cannot be fetched without signing in.
+    #[serde(default)]
+    pub cookie_file: Option<String>,
 }
 
 /// One quality a web page video can be downloaded in.
