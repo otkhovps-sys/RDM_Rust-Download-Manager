@@ -14,6 +14,8 @@ pub enum Error {
     Url(#[from] url::ParseError),
     #[error("connection closed before the data was complete")]
     Incomplete,
+    #[error("{} is not installed", .0.name())]
+    MissingTool(crate::Tool),
     #[error("{0}")]
     Other(String),
     #[error("cancelled")]

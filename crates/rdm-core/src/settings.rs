@@ -36,6 +36,8 @@ pub struct Settings {
     pub user_agent: String,
     /// Dark window theme instead of the classic light one.
     pub dark_mode: bool,
+    /// Closing the window keeps RDM running in the system tray.
+    pub close_to_tray: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
                 env!("CARGO_PKG_VERSION")
             ),
             dark_mode: false,
+            close_to_tray: true,
         }
     }
 }

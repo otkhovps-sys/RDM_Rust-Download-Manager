@@ -164,6 +164,10 @@ impl OptionsDialog {
         let s = &mut self.settings;
         ui.checkbox(&mut s.dark_mode, "Dark theme");
         ui.checkbox(
+            &mut s.close_to_tray,
+            "Closing the window keeps RDM running in the system tray",
+        );
+        ui.checkbox(
             &mut s.show_complete_dialog,
             "Show the \"Download complete\" dialog",
         );

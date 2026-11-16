@@ -5,7 +5,7 @@ use reqwest::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTEN
 
 use crate::http::Ctx;
 use crate::util::{extension_for_mime, file_name_from_url, parse_content_disposition};
-use crate::{Kind, RequestInfo, Result, hls};
+use crate::{Kind, RequestInfo, Result, hls, ytdlp};
 
 #[derive(Clone, Debug)]
 pub struct ProbeResult {
@@ -19,11 +19,16 @@ pub struct ProbeResult {
     pub hls_segments: Option<usize>,
     /// Name and files of a torrent.
     pub torrent: Option<crate::TorrentMeta>,
+    /// Qualities of a web page video, best first (empty for everything else).
+    pub page: Vec<crate::PageOption>,
 }
 
 pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<ProbeResult> {
     if crate::is_torrent_source(url) {
         return ctx.torrents.probe(ctx, url, req).await;
+    }
+    if req.page {
+        return ytdlp::probe(ctx, url).await;
     }
     let response = ctx.get(url, req).header("Range", "bytes=0-").send().await?;
     let status = response.status();
@@ -45,6 +50,19 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
     {
         drop(response);
         return ctx.torrents.probe(ctx, url, req).await;
+    }
+
+    // A web page: maybe it shows a video yt-dlp can fetch. If not, the page
+    // itself is downloaded like any other file.
+    if content_type
+        .as_deref()
+        .is_some_and(|t| t.starts_with("text/html"))
+    {
+        match ytdlp::probe(ctx, url).await {
+            Ok(page) => return Ok(page),
+            Err(e @ crate::Error::MissingTool(_)) if ytdlp::is_video_site(url) => return Err(e),
+            Err(_) => {}
+        }
     }
 
     let is_hls = content_type
@@ -90,6 +108,7 @@ pub(crate) async fn probe(ctx: &Ctx, url: &str, req: &RequestInfo) -> Result<Pro
         content_type,
         hls_segments: None,
         torrent: None,
+        page: Vec::new(),
     })
 }
 
@@ -115,5 +134,6 @@ async fn probe_hls(
         content_type,
         hls_segments: Some(playlist.segments.len()),
         torrent: None,
+        page: Vec::new(),
     })
 }

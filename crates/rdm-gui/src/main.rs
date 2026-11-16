@@ -7,6 +7,7 @@ mod fonts;
 mod icons;
 mod server;
 mod table;
+mod tray;
 mod widgets;
 
 use rdm_core::Engine;
@@ -15,9 +16,11 @@ fn main() {
     install_crash_handler();
 
     // `rdm <url>`: hand the URL to an already running instance (single instance).
+    // `--minimized` (used by "start with Windows") starts hidden in the tray.
+    let start_hidden = std::env::args().any(|arg| arg == "--minimized");
     let url_arg = std::env::args()
-        .nth(1)
-        .and_then(|arg| source_argument(&arg));
+        .skip(1)
+        .find_map(|arg| source_argument(&arg));
     let port = rdm_core::Settings::load().server_port;
     if server::forward_to_running(port, url_arg.as_deref()) {
         return;
@@ -33,6 +36,7 @@ fn main() {
             wgpu_options: low_power_gpu(),
             viewport: egui::ViewportBuilder::default()
                 .with_title("RDM - Rust Download Manager")
+                .with_visible(!start_hidden)
                 .with_app_id("rdm")
                 .with_inner_size([960.0, 560.0])
                 .with_min_inner_size([640.0, 360.0])
@@ -43,7 +47,7 @@ fn main() {
         let result = eframe::run_native(
             "RDM",
             options,
-            Box::new(move |cc| Ok(Box::new(app::RdmApp::new(cc, engine, url)))),
+            Box::new(move |cc| Ok(Box::new(app::RdmApp::new(cc, engine, url, start_hidden)))),
         );
         match result {
             Ok(()) => return,

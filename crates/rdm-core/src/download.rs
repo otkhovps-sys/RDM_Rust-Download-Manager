@@ -30,6 +30,16 @@ pub enum Kind {
     Hls,
     /// BitTorrent (magnet link or `.torrent` file).
     Torrent,
+    /// Video on a web page (YouTube and other sites), fetched by yt-dlp.
+    Page,
+}
+
+impl Kind {
+    /// These kinds write their final files themselves; the others download
+    /// into a `.rdm-part` file that the engine renames when complete.
+    pub(crate) fn writes_final_files(self) -> bool {
+        matches!(self, Self::Torrent | Self::Page)
+    }
 }
 
 /// One byte range `[start, end)` of the file; `done` bytes are on disk.
@@ -73,6 +83,23 @@ pub struct RequestInfo {
     pub referer: Option<String>,
     pub cookies: Option<String>,
     pub user_agent: Option<String>,
+    /// The URL is a web page showing a video, not a file (use yt-dlp).
+    #[serde(default)]
+    pub page: bool,
+}
+
+/// One quality a web page video can be downloaded in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PageOption {
+    /// Shown in the quality list, e.g. `1080p` or `Audio only (MP3)`.
+    pub label: String,
+    /// Maximum video height; `None` = best available.
+    pub height: Option<u32>,
+    pub audio_only: bool,
+    /// Extension of the resulting file.
+    pub ext: String,
+    /// Approximate size in bytes.
+    pub size: Option<u64>,
 }
 
 /// One file inside a torrent.
@@ -131,6 +158,9 @@ pub struct Download {
     pub hls: Option<HlsProgress>,
     #[serde(default)]
     pub torrent: Option<TorrentMeta>,
+    /// Chosen quality of a web page video.
+    #[serde(default)]
+    pub page: Option<PageOption>,
     pub request: RequestInfo,
     /// Unix timestamps (seconds).
     pub added_at: u64,

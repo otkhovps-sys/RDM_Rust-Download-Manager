@@ -119,6 +119,7 @@ impl TorrentClient {
             content_type: Some("application/x-bittorrent".into()),
             hls_segments: None,
             torrent: Some(meta),
+            page: Vec::new(),
         })
     }
 

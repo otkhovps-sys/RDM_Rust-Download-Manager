@@ -14,11 +14,12 @@ use crate::download::SharedDownload;
 use crate::http::Ctx;
 use crate::limiter::Limiter;
 use crate::store::Store;
+use crate::tools::{InstallHandle, Tool, Tools};
 use crate::torrent::TorrentClient;
 use crate::util::{now_secs, sanitize_file_name, unique_file_name};
 use crate::{
-    Category, Download, DownloadId, Error, Kind, ProbeResult, RequestInfo, Result, Settings,
-    Status, TorrentMeta,
+    Category, Download, DownloadId, Error, Kind, PageOption, ProbeResult, RequestInfo, Result,
+    Settings, Status, TorrentMeta,
 };
 
 const TICK: Duration = Duration::from_millis(500);
@@ -45,6 +46,8 @@ pub struct NewDownload {
     pub description: String,
     /// Torrent files and which of them to download.
     pub torrent: Option<TorrentMeta>,
+    /// Chosen quality of a web page video.
+    pub page: Option<PageOption>,
     /// `false` = "Download Later" (added paused).
     pub start: bool,
 }
@@ -52,7 +55,7 @@ pub struct NewDownload {
 impl NewDownload {
     pub fn from_probe(probe: &ProbeResult, request: RequestInfo, settings: &Settings) -> Self {
         let category = match (probe.kind, &probe.torrent) {
-            (Kind::Hls, _) => Category::Video,
+            (Kind::Hls | Kind::Page, _) => Category::Video,
             // A torrent is filed under the type of its biggest file.
             (Kind::Torrent, Some(meta)) => meta
                 .files
@@ -61,7 +64,7 @@ impl NewDownload {
                 .map_or(Category::Other, |f| Category::from_file_name(&f.path)),
             _ => Category::from_file_name(&probe.file_name),
         };
-        Self {
+        let mut new = Self {
             url: probe.url.clone(),
             file_name: probe.file_name.clone(),
             save_dir: settings.save_dir_for(category),
@@ -72,8 +75,37 @@ impl NewDownload {
             request,
             description: String::new(),
             torrent: probe.torrent.clone(),
+            page: None,
             start: true,
+        };
+        // Full HD is a sensible default for videos; 4K files are huge.
+        let default = probe
+            .page
+            .iter()
+            .find(|o| o.height.is_none_or(|h| h <= 1080))
+            .or(probe.page.first());
+        if let Some(option) = default {
+            new.set_quality(option.clone());
+            new.save_dir = settings.save_dir_for(new.category);
         }
+        new
+    }
+
+    /// Picks the quality of a web page video; name, size and category follow.
+    pub fn set_quality(&mut self, option: PageOption) {
+        // Keep the name (the user may have edited it), only swap the extension.
+        let stem = self
+            .file_name
+            .rsplit_once('.')
+            .map_or(self.file_name.as_str(), |(stem, _)| stem);
+        self.file_name = format!("{stem}.{}", option.ext);
+        self.size = option.size;
+        self.category = if option.audio_only {
+            Category::Music
+        } else {
+            Category::Video
+        };
+        self.page = Some(option);
     }
 }
 
@@ -104,6 +136,7 @@ struct Inner {
     limiter: Arc<Limiter>,
     store: Store,
     torrents: Arc<TorrentClient>,
+    tools: Arc<Tools>,
     settings: Mutex<Settings>,
     jobs: Mutex<Vec<Job>>,
     next_id: AtomicU64,
@@ -151,6 +184,7 @@ impl Engine {
             client,
             limiter: Arc::new(Limiter::new(settings.speed_limit_kib * 1024)),
             torrents: Arc::new(TorrentClient::new(store.torrent_dir())),
+            tools: Arc::new(Tools::new(store.tools_dir())),
             store,
             settings: Mutex::new(settings),
             jobs: Mutex::new(jobs),
@@ -193,6 +227,22 @@ impl Engine {
         ProbeHandle(rx)
     }
 
+    /// Path of a helper program (yt-dlp, ffmpeg) if it is installed.
+    pub fn tool_path(&self, tool: Tool) -> Option<PathBuf> {
+        self.inner.tools.find(tool)
+    }
+
+    /// Downloads the official build of a helper program in the background.
+    pub fn install_tool(&self, tool: Tool) -> InstallHandle {
+        let handle = InstallHandle::default();
+        let (inner, task_handle) = (self.inner.clone(), handle.clone());
+        self.inner.handle.spawn(async move {
+            let result = inner.tools.install(&inner.client, tool, &task_handle).await;
+            task_handle.finish(result);
+        });
+        handle
+    }
+
     pub fn add(&self, new: NewDownload) -> DownloadId {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let mut jobs = self.inner.jobs.lock().unwrap();
@@ -205,7 +255,7 @@ impl Engine {
         let file_name = match new.kind {
             // Torrent names come from the torrent and an existing folder means
             // the data is already partly there, so never rename them.
-            Kind::Torrent => sanitize_file_name(&new.file_name),
+            Kind::Torrent | Kind::Page => sanitize_file_name(&new.file_name),
             _ => unique_file_name(&new.save_dir, &sanitize_file_name(&new.file_name), taken),
         };
         let download = Download {
@@ -226,6 +276,7 @@ impl Engine {
             segments: Vec::new(),
             hls: None,
             torrent: new.torrent,
+            page: new.page,
             request: new.request,
             added_at: now_secs(),
             last_try: None,
@@ -400,6 +451,7 @@ impl Inner {
             connections: settings.connections,
             max_retries: settings.max_retries,
             torrents: self.torrents.clone(),
+            tools: self.tools.clone(),
         }
     }
 
@@ -457,9 +509,10 @@ impl Inner {
                     let torrents = ctx.torrents.clone();
                     torrents.run(ctx, data.clone(), cancel_rx).await
                 }
+                Kind::Page => crate::ytdlp::run(ctx, data.clone(), cancel_rx).await,
             };
             let result = match result {
-                Ok(()) if kind != Kind::Torrent => finalize(&data).await,
+                Ok(()) if !kind.writes_final_files() => finalize(&data).await,
                 other => other,
             };
             inner.finished(&data, result);
@@ -541,6 +594,9 @@ async fn discard_data(inner: &Inner, d: &Download, everything: bool) {
             };
         }
         return;
+    }
+    if d.kind == Kind::Page {
+        crate::ytdlp::remove_temp_files(d).await;
     }
     let _ = tokio::fs::remove_file(d.part_path()).await;
     if everything && d.status == Status::Completed {

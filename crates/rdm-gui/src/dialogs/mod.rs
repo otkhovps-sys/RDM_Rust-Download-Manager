@@ -12,7 +12,7 @@ use egui::{Align2, Context, Id};
 use rdm_core::{Download, DownloadId, Engine, RequestInfo, Settings};
 
 use crate::app::Command;
-use about::show_about;
+use about::{show_about, show_credits};
 use complete::show_complete;
 use delete::DeleteConfirm;
 use file_info::{AddUrl, FileInfo};
@@ -28,10 +28,16 @@ pub struct Dialogs {
     delete: Option<DeleteConfirm>,
     options: Option<OptionsDialog>,
     pub about: bool,
+    pub credits: bool,
     next_id: u64,
 }
 
 impl Dialogs {
+    /// No dialog is waiting for the user.
+    pub fn is_empty(&self) -> bool {
+        self.add_url.is_none() && self.file_info.is_empty()
+    }
+
     pub fn open_add_url(&mut self) {
         self.add_url = Some(AddUrl::new());
     }
@@ -110,7 +116,10 @@ impl Dialogs {
         }
 
         if self.about {
-            self.about = show_about(ctx);
+            self.about = show_about(ctx, &mut self.credits);
+        }
+        if self.credits {
+            self.credits = show_credits(ctx);
         }
         commands
     }

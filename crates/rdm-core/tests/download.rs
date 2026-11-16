@@ -380,3 +380,76 @@ fn torrent_from_local_seeder() {
     engine.shutdown();
     std::mem::forget(rt);
 }
+
+/// Runs the whole web-page-video flow against a stand-in for yt-dlp that
+/// speaks the same command line and progress format.
+#[cfg(unix)]
+#[test]
+fn page_video_through_yt_dlp() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const FAKE_YT_DLP: &str = r#"#!/bin/sh
+out=""; json=0; prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out="$a"
+  [ "$a" = "--dump-single-json" ] && json=1
+  prev="$a"
+done
+if [ $json = 1 ]; then
+  echo '{"title":"My: Video?","formats":[
+    {"height":null,"vcodec":"none","acodec":"opus","ext":"webm","filesize":1000},
+    {"height":720,"vcodec":"avc1","acodec":"none","ext":"mp4","filesize":5000},
+    {"height":360,"vcodec":"avc1","acodec":"mp4a","ext":"mp4","filesize":2000}]}'
+  exit 0
+fi
+file=$(printf '%s' "$out" | sed 's/%(ext)s/mp4/')
+echo "RDM|2500|5000|NA"; sleep 0.2
+echo "RDM|5000|5000|NA"
+echo "RDM|400|NA|1000.0"; sleep 0.2
+echo "RDM|1000|NA|1000.0"
+printf 'video-data' > "$file"
+echo "RDMFILE|$file"
+"#;
+
+    let (engine, dir) = engine("page");
+    let tools = rdm_core::data_dir().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    for (name, content) in [("yt-dlp", FAKE_YT_DLP), ("ffmpeg", "#!/bin/sh\n")] {
+        let path = tools.join(name);
+        std::fs::write(&path, content).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    assert!(engine.tool_path(rdm_core::Tool::YtDlp).is_some());
+
+    let request = RequestInfo {
+        page: true,
+        ..Default::default()
+    };
+    let mut handle = engine.probe("https://video.example/watch?v=1", request.clone());
+    let start = Instant::now();
+    let probe = loop {
+        if let Some(result) = handle.try_take() {
+            break result.unwrap();
+        }
+        assert!(start.elapsed() < Duration::from_secs(20), "probe timeout");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(probe.kind, rdm_core::Kind::Page);
+    assert_eq!(probe.file_name, "My_ Video_.mp4");
+    let labels: Vec<_> = probe.page.iter().map(|o| o.label.as_str()).collect();
+    assert_eq!(labels, ["720p", "360p", "Audio only (MP3)"]);
+    assert_eq!(probe.size, Some(6000));
+
+    let mut new = NewDownload::from_probe(&probe, request, &engine.settings());
+    assert_eq!(new.category, rdm_core::Category::Video);
+    new.save_dir = dir.clone();
+    let id = engine.add(new);
+    let d = wait_for(&engine, id, |s| {
+        matches!(s, Status::Completed | Status::Failed(_))
+    });
+    assert_eq!(d.status, Status::Completed);
+    assert_eq!(d.file_name, "My_ Video_.mp4");
+    assert_eq!(std::fs::read(d.path()).unwrap(), b"video-data");
+    assert_eq!(d.size, Some(10));
+    engine.shutdown();
+}

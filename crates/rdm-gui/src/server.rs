@@ -1,8 +1,8 @@
 //! Local HTTP endpoint for the browser extension (127.0.0.1 only).
 //!
 //! * `GET  /ping`     -> app info and the file types to capture
-//! * `POST /download` -> `{url, referer?, cookies?, userAgent?, fileName?}`
-//!   (`url` may also be a magnet link)
+//! * `POST /download` -> `{url, referer?, cookies?, userAgent?, fileName?, page?}`
+//!   (`url` may also be a magnet link; `page: true` marks a video page for yt-dlp)
 //! * `POST /show`     -> bring the main window to the front
 
 use std::io::{Read, Write};
@@ -35,6 +35,9 @@ struct DownloadBody {
     cookies: Option<String>,
     user_agent: Option<String>,
     file_name: Option<String>,
+    /// `url` is a web page with a video (YouTube, ...), not a file.
+    #[serde(default)]
+    page: bool,
 }
 
 /// Starts the server thread. Fails when the port is already taken.
@@ -90,6 +93,7 @@ fn handle(mut request: Request, engine: &Engine, tx: &Sender<Message>, ctx: &egu
                         referer: body.referer,
                         cookies: body.cookies,
                         user_agent: body.user_agent,
+                        page: body.page,
                     },
                     file_name: body.file_name,
                 }));

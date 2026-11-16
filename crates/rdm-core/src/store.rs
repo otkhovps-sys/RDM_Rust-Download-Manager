@@ -43,6 +43,11 @@ impl Store {
         self.dir.join("torrents")
     }
 
+    /// Folder for helper programs RDM installed (yt-dlp, ffmpeg).
+    pub fn tools_dir(&self) -> PathBuf {
+        self.dir.join("tools")
+    }
+
     pub fn load_settings(&self) -> Settings {
         load(&self.dir.join("settings.json")).unwrap_or_default()
     }

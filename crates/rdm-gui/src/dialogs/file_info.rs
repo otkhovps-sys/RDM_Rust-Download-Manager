@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use egui::{Context, Id, RichText};
 use rdm_core::util::format_bytes;
 use rdm_core::{
-    Category, Engine, Kind, NewDownload, ProbeHandle, ProbeResult, RequestInfo, TorrentMeta,
+    Category, Engine, InstallHandle, Kind, NewDownload, ProbeHandle, ProbeResult, RequestInfo,
+    Tool, TorrentMeta,
 };
 
 use super::{button_row, window};
@@ -84,8 +85,25 @@ fn looks_like_url(text: &str) -> bool {
 
 enum State {
     Probing(ProbeHandle),
-    Failed(String),
+    /// A helper program (yt-dlp, ffmpeg) is being downloaded.
+    Installing(Tool, InstallHandle),
+    Failed(Failure),
     Ready(Box<Form>),
+}
+
+struct Failure {
+    message: String,
+    /// The helper program whose absence caused the failure.
+    missing: Option<Tool>,
+}
+
+/// What the form asks the dialog to do.
+enum FormAction {
+    Keep,
+    Close,
+    /// Ask the server again.
+    Retry,
+    Install(Tool),
 }
 
 struct Form {
@@ -129,11 +147,29 @@ impl FileInfo {
         {
             self.state = match result {
                 Ok(probe) => State::Ready(Box::new(self.form(probe, engine))),
-                Err(e) => State::Failed(e.to_string()),
+                Err(e) => State::Failed(Failure {
+                    message: e.to_string(),
+                    missing: match e {
+                        rdm_core::Error::MissingTool(tool) => Some(tool),
+                        _ => None,
+                    },
+                }),
+            };
+        }
+        if let State::Installing(_, handle) = &self.state
+            && let Some(result) = handle.result()
+        {
+            self.state = match result {
+                Ok(()) => State::Probing(engine.probe(&self.url, self.request.clone())),
+                Err(message) => State::Failed(Failure {
+                    message,
+                    missing: None,
+                }),
             };
         }
 
         let mut open = true;
+        let mut action = FormAction::Keep;
         let id = Id::unique(("file-info", self.id));
         window(ctx, "Download File Info".into(), id, self.id).show(ctx, |ui| {
             ui.set_width(480.0);
@@ -152,24 +188,59 @@ impl FileInfo {
                     ctx.request_repaint_after(std::time::Duration::from_millis(100));
                     button_row(ui, |ui| open &= !ui.button("Cancel").clicked());
                 }
-                State::Failed(error) => {
+                State::Installing(tool, handle) => {
+                    ui.label(format!("Downloading {}...", tool.name()));
+                    ui.add(
+                        egui::ProgressBar::new(handle.progress().unwrap_or(0.0)).show_percentage(),
+                    );
+                    ui.weak("The official build is downloaded and its checksum verified.");
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                    button_row(ui, |ui| open &= !ui.button("Close").clicked());
+                }
+                State::Failed(failure) => {
                     ui.colored_label(
                         egui::Color32::from_rgb(229, 57, 53),
-                        format!("Cannot download: {error}"),
+                        format!("Cannot download: {}", failure.message),
                     );
                     ui.weak(&self.url);
-                    let mut retry = false;
+                    let installable = failure.missing.filter(|tool| tool.can_install());
+                    if installable.is_some() {
+                        ui.add_space(4.0);
+                        ui.label(
+                            "Video sites such as YouTube need yt-dlp, a free open source \
+                             program. RDM can download the official build from \
+                             github.com/yt-dlp (about 35 MB).",
+                        );
+                    }
                     button_row(ui, |ui| {
                         open &= !ui.button("Close").clicked();
-                        retry = ui.button("Try again").clicked();
+                        if ui.button("Try again").clicked() {
+                            action = FormAction::Retry;
+                        }
+                        if let Some(tool) = installable
+                            && ui
+                                .button(RichText::new(format!("Install {}", tool.name())).strong())
+                                .clicked()
+                        {
+                            action = FormAction::Install(tool);
+                        }
                     });
-                    if retry {
-                        self.state = State::Probing(engine.probe(&self.url, self.request.clone()));
-                    }
                 }
-                State::Ready(form) => open &= form.show(ui, engine),
+                State::Ready(form) => {
+                    action = form.show(ui, engine);
+                    open &= !matches!(action, FormAction::Close);
+                }
             }
         });
+        match action {
+            FormAction::Install(tool) => {
+                self.state = State::Installing(tool, engine.install_tool(tool))
+            }
+            FormAction::Retry => {
+                self.state = State::Probing(engine.probe(&self.url, self.request.clone()));
+            }
+            _ => {}
+        }
         open
     }
 
@@ -206,8 +277,8 @@ impl FileInfo {
 }
 
 impl Form {
-    fn show(&mut self, ui: &mut egui::Ui, engine: &Engine) -> bool {
-        let mut open = true;
+    fn show(&mut self, ui: &mut egui::Ui, engine: &Engine) -> FormAction {
+        let mut action = FormAction::Keep;
         egui::Grid::new("file-info-grid")
             .num_columns(2)
             .spacing([8.0, 6.0])
@@ -230,6 +301,12 @@ impl Form {
                     self.dir_text = self.new.save_dir.display().to_string();
                 }
                 ui.end_row();
+
+                if !self.probe.page.is_empty() {
+                    ui.label("Quality:");
+                    self.quality(ui, engine);
+                    ui.end_row();
+                }
 
                 ui.label("Save to:");
                 ui.horizontal(|ui| {
@@ -264,15 +341,19 @@ impl Form {
                 ui.end_row();
 
                 ui.label("Size:");
-                ui.label(match &self.new.torrent {
-                    Some(meta) => format_bytes(meta.selected_size()),
-                    None => size_text(&self.probe),
+                ui.label(match (&self.new.torrent, &self.new.page) {
+                    (Some(meta), _) => format_bytes(meta.selected_size()),
+                    (_, Some(option)) => option.size.map_or("Unknown".to_owned(), |s| {
+                        format!("about {}", format_bytes(s))
+                    }),
+                    _ => size_text(&self.probe),
                 });
                 ui.end_row();
 
                 ui.label("Resume:");
                 ui.label(match (self.new.kind, self.probe.resumable) {
                     (Kind::Torrent, _) => "Yes - BitTorrent (peer to peer)",
+                    (Kind::Page, _) => "Yes - video site (yt-dlp)",
                     (_, true) => "Yes - multiple connections",
                     (_, false) => "No - single connection",
                 });
@@ -282,10 +363,26 @@ impl Form {
         if let Some(meta) = &mut self.new.torrent {
             torrent_files(ui, meta);
         }
+        if self.new.kind == Kind::Page && engine.tool_path(Tool::Ffmpeg).is_none() {
+            ui.add_space(4.0);
+            ui.weak(
+                "ffmpeg is not installed, so only qualities that come as one ready-made file \
+                 are listed (often 360p). With ffmpeg RDM can fetch every quality and MP3.",
+            );
+            if Tool::Ffmpeg.can_install() {
+                if ui.button("Install ffmpeg (about 130 MB)").clicked() {
+                    action = FormAction::Install(Tool::Ffmpeg);
+                }
+            } else {
+                ui.weak("Install it with your package manager, e.g. `brew install ffmpeg`.");
+            }
+        }
 
         let mut add = None;
         button_row(ui, |ui| {
-            open &= !ui.button("Cancel").clicked();
+            if ui.button("Cancel").clicked() {
+                action = FormAction::Close;
+            }
             if ui.button("Download Later").clicked() {
                 add = Some(false);
             }
@@ -309,9 +406,38 @@ impl Form {
             new.save_dir = PathBuf::from(self.dir_text.trim());
             new.start = start;
             engine.add(new);
-            open = false;
+            action = FormAction::Close;
         }
-        open
+        action
+    }
+
+    /// Quality list of a web page video.
+    fn quality(&mut self, ui: &mut egui::Ui, engine: &Engine) {
+        let current = self.new.page.clone();
+        egui::ComboBox::from_id_salt("quality")
+            .selected_text(current.as_ref().map_or("", |o| o.label.as_str()))
+            .show_ui(ui, |ui| {
+                for option in &self.probe.page {
+                    let text = match option.size {
+                        Some(size) => format!("{}  ({})", option.label, format_bytes(size)),
+                        None => option.label.clone(),
+                    };
+                    ui.selectable_value(&mut self.new.page, Some(option.clone()), text);
+                }
+            });
+        let Some(option) = self
+            .new
+            .page
+            .clone()
+            .filter(|o| Some(o) != current.as_ref())
+        else {
+            return;
+        };
+        self.new.set_quality(option);
+        if !self.custom_dir {
+            self.new.save_dir = engine.settings().save_dir_for(self.new.category);
+            self.dir_text = self.new.save_dir.display().to_string();
+        }
     }
 }
 

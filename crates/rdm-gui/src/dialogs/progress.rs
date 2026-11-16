@@ -121,6 +121,7 @@ fn row(ui: &mut egui::Ui, name: &str, value: &str) {
 
 fn status_text(d: &Download) -> String {
     match &d.status {
+        Status::Downloading if d.kind == Kind::Page => "Receiving data (yt-dlp)...".into(),
         Status::Downloading if d.kind == Kind::Torrent => {
             format!("Downloading from {} peers", d.connections)
         }
@@ -143,6 +144,10 @@ fn details(ui: &mut egui::Ui, d: &Download) {
         if let Some(h) = d.hls {
             ui.label(format!("HLS segments: {} / {}", h.done, h.total));
         }
+        return;
+    }
+    if let Some(option) = &d.page {
+        ui.label(format!("Video page, quality: {}", option.label));
         return;
     }
     if let Some(meta) = &d.torrent {
