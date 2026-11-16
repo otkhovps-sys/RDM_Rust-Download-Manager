@@ -67,7 +67,9 @@ fn serve_routes(
                     if sock.write_all(head.as_bytes()).await.is_err() {
                         return;
                     }
-                    for chunk in data[start..=end].chunks(64 * 1024) {
+                    // At most 8 MB/s per connection, so that even on a fast
+                    // machine a download is still running when a test pauses it.
+                    for chunk in data[start..=end].chunks(16 * 1024) {
                         if sock.write_all(chunk).await.is_err() {
                             return;
                         }
